@@ -6,40 +6,81 @@ use wain_syntax_binary::parse;
 use etk_asm::ops::AbstractOp;
 use etk_asm::ops::Abstract;
 use etk_asm::ops::Op;
+use etk_asm::asm::Assembler;
+use rand::Rng;
+
+
 use wain_ast::*;
 use wain_ast::FuncKind;
+#[derive(Debug)]
+struct Context {
+    labels: Vec<String>,
+
+}
 
 fn main() {
     let source = fs::read("fib.wasm").unwrap();
     let mut commands: Vec<AbstractOp> = Vec::new();
     match parse(&source) {
         Ok(tree) => {
-            println!("{:?}", tree.module.funcs);  
-
+            println!("{:#?}", tree.module.funcs);  
             for funcs in tree.module.funcs {
+                let mut globals: Context = Context { labels: Vec::new() };
+                // push4 params.length * 0x20
+                // push1 0
+                // push1 0 
+                let length = tree.module.types.get(funcs.idx as usize).unwrap().params.len();
+                commands.append(&mut vec![AbstractOp::Op(Op::Push2(Imm::from(length as u16 * 0x20 as u16)))]);
+
+                commands.append(&mut vec![AbstractOp::Op(Op::Push1(Imm::from(0 as u8)))]);
+                commands.append(&mut vec![AbstractOp::Op(Op::Push1(Imm::from(0 as u8)))]);
+
+                commands.append(&mut vec![AbstractOp::Op(Op::CallDataCopy)]);
+
                 match &funcs.kind {
                     FuncKind::Import(s) => {},
                     FuncKind::Body {locals, expr} => {
-                            commands.append(instructions_handler(expr).as_mut());
+                            commands.append(instructions_handler(expr, &mut globals).as_mut());
                         }
                     }
+                    println!("globals {:#?}", globals);
                 };
             }
         Err(err) => eprintln!("Error! {}", err),
     };
 
-    println!("{:?}", commands);  
+    println!("{:#?}", commands);  
+    let mut asm = Assembler::new();
+    asm.push_all(commands).unwrap();
+    let output = asm.take();
+    asm.finish().unwrap();
 
+    println!("{}", hex::encode(output));
 }
 
-fn instructions_handler (body: &Vec<Instruction>)  -> Vec<AbstractOp> {
+fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec<AbstractOp> {
     let mut commands: Vec<AbstractOp> = Vec::new();
 
     for instr in body {
         match &instr.kind {
             InsnKind::Block { ty, body } => {
-                commands.append(instructions_handler(body).as_mut());
+                let mut rng = rand::thread_rng();
+                let id: u32 = rng.gen();
+                context.labels.push(id.to_string());
+                commands.append(instructions_handler(body, context).as_mut());
+                commands.push(AbstractOp::Label(id.to_string()));
+                commands.push(AbstractOp::Op(Op::JumpDest));
+                context.labels.pop();
             },
+            InsnKind::Loop { ty, body } => {
+                let mut rng = rand::thread_rng();
+                let id: u32 = rng.gen();
+                context.labels.push(id.to_string());
+                commands.push(AbstractOp::Label(id.to_string()));
+                commands.push(AbstractOp::Op(Op::JumpDest));
+                commands.append(instructions_handler(body, context).as_mut());
+                context.labels.pop();
+            }
             InsnKind::I32Add => {
                 commands.append(i32Add().as_mut());
             },
@@ -182,8 +223,20 @@ fn instructions_handler (body: &Vec<Instruction>)  -> Vec<AbstractOp> {
                 commands.append(Nop().as_mut());
             },
             InsnKind::Unreachable => {
-                commands.append(Nop().as_mut());
+                commands.append(unreachable().as_mut());
             },
+            InsnKind::LocalGet(idx) => {
+                commands.append(Local_get(idx).as_mut());
+            },
+            InsnKind::LocalSet(idx) => {
+                commands.append(Local_set(idx).as_mut());
+            },
+            InsnKind::LocalTee(idx) => {
+                commands.append(Local_tee(idx).as_mut());
+            },
+            InsnKind::BrIf( idx) => {
+                commands.append(br_if(context, idx).as_mut());
+            }
             _ => {},
         };
     }
@@ -773,6 +826,43 @@ fn unreachable () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn Local_get (idx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
+    result.push(AbstractOp::Op(Op::MLoad));
+
+    result
+}
+
+fn Local_set (idx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
+    result.push(AbstractOp::Op(Op::MStore));
+
+    result
+}
+
+fn Local_tee (idx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
+    result.push(AbstractOp::Op(Op::MStore));
+
+    result
+}
+
+fn br_if (context: &Context, idx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(context.labels.get(*idx as usize).unwrap()))));
+    result.push(AbstractOp::Op(Op::JumpI));
 
     result
 }

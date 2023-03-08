@@ -379,6 +379,8 @@ name = "wasm-reader"
 version = "0.1.0"
 dependencies = [
  "etk-asm",
+ "hex",
+ "rand",
  "wain-ast",
  "wain-syntax-binary",
 ]
