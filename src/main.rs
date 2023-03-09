@@ -33,12 +33,12 @@ fn main() {
                 let mut globals: Context = Context { labels: Vec::new() };
 
                 let length = tree.module.types.get(funcs.idx as usize).unwrap().params.len();
-                commands.append(&mut vec![AbstractOp::Op(Op::Push2(Imm::from(length as u16 * 0x20 as u16)))]);
+                commands.push(AbstractOp::Op(Op::Push2(Imm::from(length as u16 * 0x20 as u16))));
 
-                commands.append(&mut vec![AbstractOp::Op(Op::Push1(Imm::from(0 as u8)))]);
-                commands.append(&mut vec![AbstractOp::Op(Op::Push1(Imm::from(0 as u8)))]);
+                commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+                commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
 
-                commands.append(&mut vec![AbstractOp::Op(Op::CallDataCopy)]);
+                commands.push(AbstractOp::Op(Op::CallDataCopy));
 
                 match &funcs.kind {
                     FuncKind::Import(s) => {},
@@ -168,10 +168,16 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Gts().as_mut());
             },
             InsnKind::I32LeU => {
-                commands.append(Leu().as_mut());
+                commands.append(i32Leu().as_mut());
+            },
+            InsnKind::I64LeU => {
+                commands.append(i64Leu().as_mut());
             },
             InsnKind::I32GeU => {
-                commands.append(Geu().as_mut());
+                commands.append(i32Geu().as_mut());
+            },
+            InsnKind::I64GeU => {
+                commands.append(i64Geu().as_mut());
             },
             InsnKind::I32LeS => {
                 commands.append(i32Les().as_mut());
@@ -186,7 +192,10 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Ges().as_mut());
             },
             InsnKind::I32DivU => {
-                commands.append(Divu().as_mut());
+                commands.append(i32Divu().as_mut());
+            },
+            InsnKind::I64DivU => {
+                commands.append(i64Divu().as_mut());
             },
             InsnKind::I32DivS => {
                 commands.append(i32Divs().as_mut());
@@ -195,7 +204,10 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Divs().as_mut());
             },
             InsnKind::I32RemU => {
-                commands.append(Remu().as_mut());
+                commands.append(i32Remu().as_mut());
+            },
+            InsnKind::I64RemU => {
+                commands.append(i64Remu().as_mut());
             },
             InsnKind::I32RemS => {
                 commands.append(i32Rems().as_mut());
@@ -204,10 +216,16 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Rems().as_mut());
             },
             InsnKind::I32GtU => {
-                commands.append(Gtu().as_mut());
+                commands.append(i32Gtu().as_mut());
+            },
+            InsnKind::I64GtU => {
+                commands.append(i64Gtu().as_mut());
             },
             InsnKind::I32LtU => {
-                commands.append(Ltu().as_mut());
+                commands.append(i32Ltu().as_mut());
+            },
+            InsnKind::I64LtU => {
+                commands.append(i64Ltu().as_mut());
             },
             InsnKind::I32ShrS => {
                 commands.append(i32Shrs().as_mut());
@@ -216,19 +234,34 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Shrs().as_mut());
             },
             InsnKind::I32Rotl => {
-                commands.append(Rotl().as_mut());
+                commands.append(i32Rotl().as_mut());
+            },
+            InsnKind::I64Rotl => {
+                commands.append(i64Rotl().as_mut());
             },
             InsnKind::I32Rotr => {
-                commands.append(Rotr().as_mut());
+                commands.append(i32Rotr().as_mut());
+            },
+            InsnKind::I64Rotr => {
+                commands.append(i64Rotr().as_mut());
             },
             InsnKind::I32Popcnt => {
-                commands.append(Popcnt().as_mut());
+                commands.append(i32Popcnt().as_mut());
+            },
+            InsnKind::I64Popcnt => {
+                commands.append(i64Popcnt().as_mut());
             },
             InsnKind::I32Ctz => {
-                commands.append(Ctz().as_mut());
+                commands.append(i32Ctz().as_mut());
+            },
+            InsnKind::I64Ctz => {
+                commands.append(i64Ctz().as_mut());
             },
             InsnKind::I32Clz => {
-                commands.append(Clz().as_mut());
+                commands.append(i32Clz().as_mut());
+            },
+            InsnKind::I64Clz => {
+                commands.append(i64Clz().as_mut());
             },
             InsnKind::I32ShrU => {
                 commands.append(i32Shru().as_mut());
@@ -263,10 +296,10 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
             InsnKind::LocalTee(idx) => {
                 commands.append(Local_tee(idx).as_mut());
             },
-            InsnKind::BrIf( idx) => {
+            InsnKind::BrIf(idx) => {
                 commands.append(br_if(context, idx).as_mut());
             },
-            InsnKind::BrIf( idx) => {
+            InsnKind::Br(idx) => {
                 commands.append(br(context, idx).as_mut());
             },
             InsnKind::Drop => {
@@ -274,15 +307,344 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
             },
             InsnKind::Select => {
                 commands.append(select().as_mut());
-            }
-            _ => {},
+            },
+            InsnKind::If { ty, then_body, else_body } => {
+                commands.push(AbstractOp::Op(Op::Invalid));
+            },
+            InsnKind::Call(fnidx) => {
+                commands.append(call(fnidx).as_mut());
+            },
+            InsnKind::BrTable { labels, default_label } => {
+                commands.append(br_table().as_mut());
+            },
+            InsnKind::Return => {
+                commands.append(return_fn().as_mut());
+            },
+            InsnKind::CallIndirect(typidx) => {
+                commands.append(call_indirect(typidx).as_mut());
+            },
+            InsnKind::GlobalGet(globalidx) => {
+                commands.append(global_get(globalidx).as_mut());
+            },
+            InsnKind::GlobalSet(globalidx) => {
+                commands.append(global_set(globalidx).as_mut());
+            },
+            InsnKind::I32Load8S(mem) => {
+                commands.append(i32_load_8s(mem).as_mut());
+            },
+            InsnKind::I32Load8U(mem) => {
+                commands.append(i32_load_8u(mem).as_mut());
+            },
+            InsnKind::I64Load8S(mem) => {
+                commands.append(i64_load_8s(mem).as_mut());
+            },
+            InsnKind::I64Load8U(mem) => {
+                commands.append(i64_load_8u(mem).as_mut());
+            },
+            InsnKind::I32Load16S(mem) => {
+                commands.append(i32_load_16s(mem).as_mut());
+
+            },
+            InsnKind::I32Load16U(mem) => {
+                commands.append(i32_load_16u(mem).as_mut());
+
+            },
+            InsnKind::I64Load16S(mem) => {
+                commands.append(i64_load_16s(mem).as_mut());
+
+            },
+            InsnKind::I64Load16U(mem) => {
+                commands.append(i64_load_16u(mem).as_mut());
+            },
+            InsnKind::I64Load32S(mem) => {
+                commands.append(i64_load_32s(mem).as_mut());
+
+            },
+            InsnKind::I64Load32U(mem) => {
+                commands.append(i64_load_32u(mem).as_mut());
+            },
+            InsnKind::I32Load(mem) => {
+                commands.append(i32_load(mem).as_mut());
+
+            },
+            InsnKind::I64Load(mem) => {
+                commands.append(i64_load(mem).as_mut());
+            },
+            InsnKind::I32Store(mem) => {
+                commands.append(i32_store(mem).as_mut());
+
+            },
+            InsnKind::I64Store(mem) => {
+                commands.append(i64_store(mem).as_mut());
+            },
+            InsnKind::I32Store8(mem) => {
+                commands.append(i32_store8(mem).as_mut());
+            },
+            InsnKind::I32Store16(mem) => {
+                commands.append(i32_store16(mem).as_mut());
+            },
+            InsnKind::I64Store8(mem) => {
+                commands.append(i64_store8(mem).as_mut());
+            },
+            InsnKind::I64Store16(mem) => {
+                commands.append(i64_store16(mem).as_mut());
+            },
+            InsnKind::I64Store32(mem) => {
+                commands.append(i64_store32(mem).as_mut());
+            },
+            InsnKind::MemorySize => {
+                commands.append(memory_size().as_mut());
+            },
+            InsnKind::MemoryGrow => {
+                commands.append(memory_grow().as_mut());
+            },
+            InsnKind::I32Const(c ) => {
+                commands.append(i32_const_fn(c).as_mut());
+            },
+            InsnKind::I64Const(c ) => {
+                commands.append(i64_const_fn(c).as_mut());
+            },
+            InsnKind::I32WrapI64 => {
+                commands.append(i32_wrap_i64().as_mut());
+            },
+            InsnKind::I64ExtendI32S => {
+                commands.append(i64_wrap_i32s().as_mut());
+            },
+            InsnKind::I64ExtendI32U => {
+                commands.append(i64_wrap_i32u().as_mut());
+            },
+            _ => { 
+                commands.push(AbstractOp::Op(Op::Invalid));
+            },
         };
     }
 
     commands
 }
+fn i64_wrap_i32u() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Add ()  -> Vec<AbstractOp>{
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_wrap_i64() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_wrap_i32s() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_const_fn(c: &i32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_const_fn(c: &i64) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn call(fnidx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn memory_size() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn memory_grow() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn br_table() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn return_fn() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn call_indirect(typidx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn global_get(globalIdx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn global_set(globalIdx: &u32) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_load_8s(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_load_8u(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_load_16s(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_load_16u(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_load_8s(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_load_8u(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+fn i32_load(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_load(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_store(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_store8(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32_store16(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_store(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_store8(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_store16(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_store32(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32Add () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Add));
@@ -291,7 +653,8 @@ fn i32Add ()  -> Vec<AbstractOp>{
 
     result
 }
-fn i64Add ()  -> Vec<AbstractOp>{
+
+fn i64Add () -> Vec<AbstractOp>{
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Add));
@@ -301,6 +664,37 @@ fn i64Add ()  -> Vec<AbstractOp>{
     result
 }
 
+fn i64_load_16s(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_load_16u(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_load_32s(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_load_32u(mem: &Mem) -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
 fn i32Sub () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
@@ -513,7 +907,7 @@ fn i64Gts () -> Vec<AbstractOp> {
     result
 }
 
-fn Leu () -> Vec<AbstractOp> {
+fn i32Leu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -525,12 +919,19 @@ fn Leu () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Lt));
     result.push(AbstractOp::Op(Op::Or));
 
-
     result
 
 }
 
-fn Geu () -> Vec<AbstractOp> {
+fn i64Leu () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32Geu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -541,6 +942,14 @@ fn Geu () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Gt));
     result.push(AbstractOp::Op(Op::Or));
+
+    result
+}
+
+fn i64Geu () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
 
     result
 }
@@ -623,11 +1032,18 @@ fn i64Les () -> Vec<AbstractOp> {
     result
 }
 
-fn Divu () -> Vec<AbstractOp> {
+fn i32Divu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Div));
+
+    result
+}
+fn i64Divu () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
 
     result
 }
@@ -662,7 +1078,15 @@ fn i64Divs () -> Vec<AbstractOp> {
     result
 }
 
-fn Remu () -> Vec<AbstractOp> {
+fn i32Remu () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Mod));
+
+    result
+}
+fn i64Remu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -701,7 +1125,7 @@ fn i64Rems () -> Vec<AbstractOp> {
     result
 }
 
-fn Gtu () -> Vec<AbstractOp> {
+fn i32Gtu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -710,7 +1134,25 @@ fn Gtu () -> Vec<AbstractOp> {
     result
 }
 
-fn Ltu () -> Vec<AbstractOp> {
+fn i64Gtu () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Gt));
+    
+    result
+}
+
+fn i32Ltu () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+    
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Lt));
+    
+    result
+}
+
+fn i64Ltu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
     
     result.push(AbstractOp::Op(Op::Swap1));
@@ -753,7 +1195,7 @@ fn i64Shrs () -> Vec<AbstractOp> {
     result
 }
 
-fn Rotl () -> Vec<AbstractOp> {
+fn i32Rotl () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -761,7 +1203,7 @@ fn Rotl () -> Vec<AbstractOp> {
     result
 }
 
-fn Rotr () -> Vec<AbstractOp> {
+fn i64Rotl () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -769,24 +1211,67 @@ fn Rotr () -> Vec<AbstractOp> {
     result
 }
 
-fn Popcnt () -> Vec<AbstractOp> {
+fn i32Rotr () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
+    result.push(AbstractOp::Op(Op::Swap1));
     //TODO PrepareCall
     result
 }
 
-fn Ctz () -> Vec<AbstractOp> {
+fn i64Rotr () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
+    result.push(AbstractOp::Op(Op::Swap1));
     //TODO PrepareCall
     result
 }
 
-fn Clz () -> Vec<AbstractOp> {
+fn i32Popcnt () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    //TODO PrepareCall
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64Popcnt () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32Ctz () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64Ctz () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i32Clz () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64Clz () -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
     result
 }
 
