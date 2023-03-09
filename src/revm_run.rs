@@ -43,8 +43,8 @@ impl Inspector<InMemoryDB> for Inspect {
     
 }
 use revm_primitives::create_address;
-fn main() {
-    let contract_data : Bytes = hex::decode("610023600f6000396100236000f30061004060006000376300000000516300000020510163ffffffff1660005260206000f3").unwrap().into();
+pub fn deploy_contract(hex: String) {
+    let contract_data : Bytes = hex::decode(hex).unwrap().into();
     let mut evm: EVM<InMemoryDB> = revm::new();
     evm.env.tx.caller = "0x1000000000000000000000000000000000000000"
         .parse()

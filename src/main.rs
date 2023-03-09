@@ -1,5 +1,5 @@
 extern crate wain_syntax_binary;
-
+mod revm_run;
 use std::fs;
 use etk_asm::ops::Imm;
 use wain_syntax_binary::parse;
@@ -8,6 +8,7 @@ use etk_asm::ops::Abstract;
 use etk_asm::ops::Op;
 use etk_asm::asm::Assembler;
 use rand::Rng;
+use crate::revm_run::*;
 
 
 use wain_ast::*;
@@ -19,8 +20,8 @@ struct Context {
 
 }
 
-const bytes8: u64 = 0xFFFFFFFFFFFFFFFF;
-const bytes4: u32 = 0xFFFFFFFF;
+const BYTES8: u64 = 0xFFFFFFFFFFFFFFFF;
+const BYTES4: u32 = 0xFFFFFFFF;
 
 fn main() {
 
@@ -83,7 +84,7 @@ fn main() {
     assert!(15 == output2.len());
     output2.append(&mut output);
     println!("{}", hex::encode(output2.clone()));
-
+    revm_run::deploy_contract(hex::encode(output2.clone()));
 
 }
 
@@ -168,16 +169,16 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Gts().as_mut());
             },
             InsnKind::I32LeU => {
-                commands.append(i32Leu().as_mut());
+                commands.append(Leu().as_mut());
             },
             InsnKind::I64LeU => {
-                commands.append(i64Leu().as_mut());
+                commands.append(Leu().as_mut());
             },
             InsnKind::I32GeU => {
-                commands.append(i32Geu().as_mut());
+                commands.append(Geu().as_mut());
             },
             InsnKind::I64GeU => {
-                commands.append(i64Geu().as_mut());
+                commands.append(Geu().as_mut());
             },
             InsnKind::I32LeS => {
                 commands.append(i32Les().as_mut());
@@ -192,10 +193,10 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Ges().as_mut());
             },
             InsnKind::I32DivU => {
-                commands.append(i32Divu().as_mut());
+                commands.append(Divu().as_mut());
             },
             InsnKind::I64DivU => {
-                commands.append(i64Divu().as_mut());
+                commands.append(Divu().as_mut());
             },
             InsnKind::I32DivS => {
                 commands.append(i32Divs().as_mut());
@@ -204,10 +205,10 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i64Divs().as_mut());
             },
             InsnKind::I32RemU => {
-                commands.append(i32Remu().as_mut());
+                commands.append(Remu().as_mut());
             },
             InsnKind::I64RemU => {
-                commands.append(i64Remu().as_mut());
+                commands.append(Remu().as_mut());
             },
             InsnKind::I32RemS => {
                 commands.append(i32Rems().as_mut());
@@ -269,12 +270,6 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
             InsnKind::I64ShrU => {
                 commands.append(i64Shru().as_mut());
             },
-            InsnKind::I32ShrS => {
-                commands.append(i32Shrs().as_mut());
-            },
-            InsnKind::I64ShrS => {
-                commands.append(i64Shrs().as_mut());
-            },
             InsnKind::I32Shl => {
                 commands.append(i32Shl().as_mut());
             },
@@ -309,7 +304,7 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(select().as_mut());
             },
             InsnKind::If { ty, then_body, else_body } => {
-                commands.push(AbstractOp::Op(Op::Invalid));
+                commands.append(if_fn().as_mut());
             },
             InsnKind::Call(fnidx) => {
                 commands.append(call(fnidx).as_mut());
@@ -408,10 +403,10 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.append(i32_wrap_i64().as_mut());
             },
             InsnKind::I64ExtendI32S => {
-                commands.append(i64_wrap_i32s().as_mut());
+                commands.append(i64_extend_i32s().as_mut());
             },
             InsnKind::I64ExtendI32U => {
-                commands.append(i64_wrap_i32u().as_mut());
+                commands.append(i64_extend_i32u().as_mut());
             },
             _ => { 
                 commands.push(AbstractOp::Op(Op::Invalid));
@@ -421,6 +416,15 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
 
     commands
 }
+
+fn if_fn() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
 fn i64_wrap_i32u() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
@@ -433,6 +437,30 @@ fn i32_wrap_i64() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
+
+    result
+}
+
+fn i64_extend_i32s() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+    result.push(AbstractOp::Op(Op::SignExtend));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+    result.push(AbstractOp::Op(Op::And));
+
+    result
+}
+
+fn i64_extend_i32u() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+    result.push(AbstractOp::Op(Op::And));
 
     result
 }
@@ -495,9 +523,11 @@ fn br_table() -> Vec<AbstractOp> {
 
 fn return_fn() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Invalid));
-
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+    result.push(AbstractOp::Op(Op::MStore));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+    result.push(AbstractOp::Op(Op::Return));
     result
 }
 
@@ -574,7 +604,6 @@ fn i64_load_8u(mem: &Mem) -> Vec<AbstractOp> {
 }
 fn i32_load(mem: &Mem) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-
     result.push(AbstractOp::Op(Op::Invalid));
 
     result
@@ -582,7 +611,6 @@ fn i32_load(mem: &Mem) -> Vec<AbstractOp> {
 
 fn i64_load(mem: &Mem) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-
     result.push(AbstractOp::Op(Op::Invalid));
 
     result
@@ -648,7 +676,7 @@ fn i32Add () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Add));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -658,7 +686,7 @@ fn i64Add () -> Vec<AbstractOp>{
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Add));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -700,7 +728,7 @@ fn i32Sub () -> Vec<AbstractOp> {
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Sub));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::And));
 
@@ -712,7 +740,7 @@ fn i64Sub () -> Vec<AbstractOp> {
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Sub));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::And));
 
@@ -725,7 +753,7 @@ fn i32Mul () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Mul));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -735,7 +763,7 @@ fn i64Mul () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Mul));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -745,7 +773,7 @@ fn i32And () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -755,7 +783,7 @@ fn i64And () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -765,7 +793,7 @@ fn i32Or () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Or));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -775,7 +803,7 @@ fn i64Or () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Or));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -785,7 +813,7 @@ fn i32Xor () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Xor));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -795,7 +823,7 @@ fn i64Xor () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Xor));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -834,7 +862,7 @@ fn extend8s () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::And));
     result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -847,7 +875,7 @@ fn extend16s () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::And));
     result.push(AbstractOp::Op(Op::Push1(Imm::from(1 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -907,7 +935,7 @@ fn i64Gts () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Leu () -> Vec<AbstractOp> {
+fn Leu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -922,16 +950,7 @@ fn i32Leu () -> Vec<AbstractOp> {
     result
 
 }
-
-fn i64Leu () -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Invalid));
-
-    result
-}
-
-fn i32Geu () -> Vec<AbstractOp> {
+fn Geu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -942,14 +961,6 @@ fn i32Geu () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Gt));
     result.push(AbstractOp::Op(Op::Or));
-
-    result
-}
-
-fn i64Geu () -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Invalid));
 
     result
 }
@@ -1032,18 +1043,11 @@ fn i64Les () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Divu () -> Vec<AbstractOp> {
+fn Divu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Div));
-
-    result
-}
-fn i64Divu () -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Invalid));
 
     result
 }
@@ -1078,15 +1082,7 @@ fn i64Divs () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Remu () -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
-
-    result
-}
-fn i64Remu () -> Vec<AbstractOp> {
+fn Remu () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1172,7 +1168,7 @@ fn i32Shrs () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Sar));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -1189,7 +1185,7 @@ fn i64Shrs () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Sar));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -1282,7 +1278,7 @@ fn i32Shru () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Mod));
     result.push(AbstractOp::Op(Op::Shr));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
 
     result
@@ -1295,17 +1291,17 @@ fn i64Shru () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Mod));
     result.push(AbstractOp::Op(Op::Shr));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
     
     result
 }
 
-fn Shr () -> Vec<AbstractOp> {
+fn Shr() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Shr));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
     
     result
@@ -1318,7 +1314,7 @@ fn i32Shl () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Mod));
     result.push(AbstractOp::Op(Op::Shl));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
     
     result
@@ -1331,7 +1327,7 @@ fn i64Shl () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Mod));
     result.push(AbstractOp::Op(Op::Shl));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(bytes8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
     
     result
@@ -1402,7 +1398,7 @@ fn br (context: &Context, idx: &u32) -> Vec<AbstractOp> {
 fn drop () -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(bytes4))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
 
     result
 }
