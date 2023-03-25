@@ -1,40 +1,77 @@
 extern crate wain_syntax_binary;
 mod revm_run;
-use std::fs;
-use etk_asm::ops::Imm;
-use wain_syntax_binary::parse;
-use etk_asm::ops::AbstractOp;
-use etk_asm::ops::Abstract;
-use etk_asm::ops::Op;
 use etk_asm::asm::Assembler;
+use etk_asm::ops::AbstractOp;
+use etk_asm::ops::Imm;
+use etk_asm::ops::Op;
 use rand::Rng;
-use crate::revm_run::*;
+use revm_primitives::ExecutionResult;
+use std::fs;
+use std::ops::Add;
+use wain_exec::trap::{Result, Trap, TrapReason};
+use wain_exec::Value;
+use wain_syntax_binary::parse;
+use wain_validate::validate;
 
-
-use wain_ast::*;
 use wain_ast::FuncKind;
+use wain_ast::*;
+use wain_exec::DefaultImporter;
+use wain_exec::Importer;
+use wain_exec::Stack;
 
 #[derive(Debug)]
-struct Context {
+pub struct Context {
     labels: Vec<String>,
-
 }
 
-const BYTES8: u64 = 0xFFFFFFFFFFFFFFFF;
-const BYTES4: u32 = 0xFFFFFFFF;
+pub struct Runner<'module, 'source> {
+    module: &'module Module<'source>,
+}
 
-fn main() {
+impl<'m, 's> Runner<'m, 's> {
+    pub fn instantiate(module: &'m Module<'s>) -> Result<Self> {
+        let mut runtime = Self {
+            module: module,
+        };
 
-    let source = fs::read("add.wasm").unwrap();
-    let mut commands: Vec<AbstractOp> = Vec::new();
-    match parse(&source) {
-        Ok(tree) => {
-            println!("{:#?}", tree.module.funcs);  
-            for funcs in tree.module.funcs {
+        Ok(runtime)
+    }
+
+    pub fn invoke(&mut self, name: impl AsRef<str>, args: &[Value]) -> Option<ExecutionResult> {
+        fn find_func_to_invoke<'s>(
+            name: &str,
+            exports: &[wain_ast::Export<'s>],
+        ) -> Option<(u32, usize)> {
+            for export in exports {
+                if export.name.0 == name {
+                    match export.kind {
+                        wain_ast::ExportKind::Func(idx) => return Some((idx, export.start)),
+                        _ => return None,
+                    };
+                }
+            }
+            None
+        }
+        let mut commands: Vec<AbstractOp> = Vec::new();
+
+        for funcs in &self.module.funcs {
+            if funcs.idx
+                == find_func_to_invoke(name.as_ref(), &self.module.exports)
+                    .unwrap()
+                    .0
+            {
                 let mut globals: Context = Context { labels: Vec::new() };
 
-                let length = tree.module.types.get(funcs.idx as usize).unwrap().params.len();
-                commands.push(AbstractOp::Op(Op::Push2(Imm::from(length as u16 * 0x20 as u16))));
+                let length = &self
+                    .module
+                    .types
+                    .get(funcs.idx as usize)
+                    .unwrap()
+                    .params
+                    .len();
+                commands.push(AbstractOp::Op(Op::Push2(Imm::from(
+                    *length as u16 * 0x20 as u16,
+                ))));
 
                 commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
                 commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
@@ -42,24 +79,79 @@ fn main() {
                 commands.push(AbstractOp::Op(Op::CallDataCopy));
 
                 match &funcs.kind {
-                    FuncKind::Import(s) => {},
-                    FuncKind::Body {locals, expr} => {
-                            commands.append(instructions_handler(expr, &mut globals).as_mut());
-                        }
+                    FuncKind::Import(s) => {}
+                    FuncKind::Body { locals, expr } => {
+                        commands.append(instructions_handler(expr, &mut globals).as_mut());
                     }
-                    println!("globals {:#?}", globals);
-                };
-                commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-                commands.push(AbstractOp::Op(Op::MStore));
-                commands.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
-                commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-                commands.push(AbstractOp::Op(Op::Return));
-
+                }
             }
+            commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+            commands.push(AbstractOp::Op(Op::MStore));
+            commands.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
+            commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+            commands.push(AbstractOp::Op(Op::Return));
+            let mut asm = Assembler::new();
+
+            asm.push_all(commands).unwrap();
+            let mut output = asm.take();
+            asm.finish().unwrap();
+            let mut deployment: Vec<AbstractOp> = Vec::new();
+            deployment.push(AbstractOp::Op(Op::Push2(Imm::from(output.len() as u16))));
+            deployment.push(AbstractOp::Op(Op::Push1(Imm::from(15 as u8))));
+            deployment.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+            deployment.push(AbstractOp::Op(Op::CodeCopy));
+            deployment.push(AbstractOp::Op(Op::Push2(Imm::from(output.len() as u16))));
+            deployment.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+            deployment.push(AbstractOp::Op(Op::Return));
+            deployment.push(AbstractOp::Op(Op::Stop));
+            let mut asm2 = Assembler::new();
+            asm2.push_all(deployment).unwrap();
+            let mut output2 = asm2.take();
+            asm2.finish().unwrap();
+            assert!(15 == output2.len());
+            output2.append(&mut output);
+
+            let mut arguments = String::new();
+            for args in args {
+                match args {
+                    Value::I32(e) => arguments += &format!("{:0>64}", e),
+                    _ => {}
+                };
+            }
+            return Some(revm_run::deploy_contract(
+                hex::encode(output2.clone()),
+                arguments.to_string(),
+            ));
+        }
+        None
+    }
+}
+
+const BYTES8: u64 = 0xFFFFFFFFFFFFFFFF;
+const BYTES4: u32 = 0xFFFFFFFF;
+
+fn main() {
+    let source = fs::read("add.wasm").unwrap();
+    let mut commands: Vec<AbstractOp> = Vec::new();
+    match parse(&source) {
+        Ok(tree) => {
+            let mut runtime = match Runner::instantiate(&tree.module) {
+                Ok(m) => m,
+                Err(err) => {
+                    eprintln!("could not instantiate module: {}", err);
+                    panic!()
+                }
+            };
+
+            match runtime.invoke("add", &[Value::I32(1), Value::I32(2)]) {
+                Some(ret) => {
+                    println!("result = {:?}", ret);
+                }
+                None => eprintln!("Execution was trapped"),
+            }
+        }
         Err(err) => eprintln!("Error! {}", err),
     };
-
-    println!("{:#?}", commands);  
     let mut asm = Assembler::new();
     asm.push_all(commands).unwrap();
     let mut output = asm.take();
@@ -77,18 +169,12 @@ fn main() {
     asm2.push_all(deployment).unwrap();
     let mut output2 = asm2.take();
     asm2.finish().unwrap();
-    println!("{}", hex::encode(output.clone()));
-    println!();
-    println!("{} {}", hex::encode(output2.clone()), output2.len());
-
     assert!(15 == output2.len());
     output2.append(&mut output);
-    println!("{}", hex::encode(output2.clone()));
-    revm_run::deploy_contract(hex::encode(output2.clone()));
-
+    revm_run::deploy_contract(hex::encode(output2.clone()), "00000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000032".to_string());
 }
 
-fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec<AbstractOp> {
+fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<AbstractOp> {
     let mut commands: Vec<AbstractOp> = Vec::new();
 
     for instr in body {
@@ -101,7 +187,7 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
                 commands.push(AbstractOp::Label(id.to_string()));
                 commands.push(AbstractOp::Op(Op::JumpDest));
                 context.labels.pop();
-            },
+            }
             InsnKind::Loop { ty, body } => {
                 let mut rng = rand::thread_rng();
                 let id: u32 = rng.gen();
@@ -113,304 +199,305 @@ fn instructions_handler (body: &Vec<Instruction>, context: &mut Context)  -> Vec
             }
             InsnKind::I32Add => {
                 commands.append(i32Add().as_mut());
-            },
+            }
             InsnKind::I64Add => {
                 commands.append(i64Add().as_mut());
-            },
+            }
             InsnKind::I32Sub => {
                 commands.append(i32Sub().as_mut());
-            },
+            }
             InsnKind::I64Sub => {
                 commands.append(i64Sub().as_mut());
-            },
+            }
             InsnKind::I32Mul => {
                 commands.append(i32Mul().as_mut());
-            },
+            }
             InsnKind::I64Mul => {
                 commands.append(i64Mul().as_mut());
-            },
+            }
             InsnKind::I32And => {
                 commands.append(i32And().as_mut());
-            },
+            }
             InsnKind::I64And => {
                 commands.append(i64And().as_mut());
-            },
+            }
             InsnKind::I32Or => {
                 commands.append(i32Or().as_mut());
-            },
+            }
             InsnKind::I64Or => {
                 commands.append(i64Or().as_mut());
-            },
+            }
             InsnKind::I32Xor => {
                 commands.append(i32Xor().as_mut());
-            },
+            }
             InsnKind::I64Xor => {
                 commands.append(i64Xor().as_mut());
-            },
+            }
             InsnKind::I32Eq => {
                 commands.append(eq().as_mut());
-            },
+            }
             InsnKind::I32Eqz => {
                 commands.append(eqz().as_mut());
-            },
+            }
             InsnKind::I32Ne => {
                 commands.append(ne().as_mut());
-            },
+            }
             InsnKind::I32LtS => {
                 commands.append(i32Lts().as_mut());
-            },
+            }
             InsnKind::I64LtS => {
                 commands.append(i64Lts().as_mut());
-            },
+            }
             InsnKind::I32GtS => {
                 commands.append(i32Gts().as_mut());
-            },
+            }
             InsnKind::I64GtS => {
                 commands.append(i64Gts().as_mut());
-            },
+            }
             InsnKind::I32LeU => {
                 commands.append(Leu().as_mut());
-            },
+            }
             InsnKind::I64LeU => {
                 commands.append(Leu().as_mut());
-            },
+            }
             InsnKind::I32GeU => {
                 commands.append(Geu().as_mut());
-            },
+            }
             InsnKind::I64GeU => {
                 commands.append(Geu().as_mut());
-            },
+            }
             InsnKind::I32LeS => {
                 commands.append(i32Les().as_mut());
-            },
+            }
             InsnKind::I64LeS => {
                 commands.append(i64Les().as_mut());
-            },
+            }
             InsnKind::I32GeS => {
                 commands.append(i32Ges().as_mut());
-            },
+            }
             InsnKind::I64GeS => {
                 commands.append(i64Ges().as_mut());
-            },
+            }
             InsnKind::I32DivU => {
                 commands.append(Divu().as_mut());
-            },
+            }
             InsnKind::I64DivU => {
                 commands.append(Divu().as_mut());
-            },
+            }
             InsnKind::I32DivS => {
                 commands.append(i32Divs().as_mut());
-            },
+            }
             InsnKind::I64DivS => {
                 commands.append(i64Divs().as_mut());
-            },
+            }
             InsnKind::I32RemU => {
                 commands.append(Remu().as_mut());
-            },
+            }
             InsnKind::I64RemU => {
                 commands.append(Remu().as_mut());
-            },
+            }
             InsnKind::I32RemS => {
                 commands.append(i32Rems().as_mut());
-            },
+            }
             InsnKind::I64RemS => {
                 commands.append(i64Rems().as_mut());
-            },
+            }
             InsnKind::I32GtU => {
                 commands.append(i32Gtu().as_mut());
-            },
+            }
             InsnKind::I64GtU => {
                 commands.append(i64Gtu().as_mut());
-            },
+            }
             InsnKind::I32LtU => {
                 commands.append(i32Ltu().as_mut());
-            },
+            }
             InsnKind::I64LtU => {
                 commands.append(i64Ltu().as_mut());
-            },
+            }
             InsnKind::I32ShrS => {
                 commands.append(i32Shrs().as_mut());
-            },
+            }
             InsnKind::I64ShrS => {
                 commands.append(i64Shrs().as_mut());
-            },
+            }
             InsnKind::I32Rotl => {
                 commands.append(i32Rotl().as_mut());
-            },
+            }
             InsnKind::I64Rotl => {
                 commands.append(i64Rotl().as_mut());
-            },
+            }
             InsnKind::I32Rotr => {
                 commands.append(i32Rotr().as_mut());
-            },
+            }
             InsnKind::I64Rotr => {
                 commands.append(i64Rotr().as_mut());
-            },
+            }
             InsnKind::I32Popcnt => {
                 commands.append(i32Popcnt().as_mut());
-            },
+            }
             InsnKind::I64Popcnt => {
                 commands.append(i64Popcnt().as_mut());
-            },
+            }
             InsnKind::I32Ctz => {
                 commands.append(i32Ctz().as_mut());
-            },
+            }
             InsnKind::I64Ctz => {
                 commands.append(i64Ctz().as_mut());
-            },
+            }
             InsnKind::I32Clz => {
                 commands.append(i32Clz().as_mut());
-            },
+            }
             InsnKind::I64Clz => {
                 commands.append(i64Clz().as_mut());
-            },
+            }
             InsnKind::I32ShrU => {
                 commands.append(i32Shru().as_mut());
-            },
+            }
             InsnKind::I64ShrU => {
                 commands.append(i64Shru().as_mut());
-            },
+            }
             InsnKind::I32Shl => {
                 commands.append(i32Shl().as_mut());
-            },
+            }
             InsnKind::I64Shl => {
                 commands.append(i64Shl().as_mut());
-            },
+            }
             InsnKind::Nop => {
                 commands.append(Nop().as_mut());
-            },
+            }
             InsnKind::Unreachable => {
                 commands.append(unreachable().as_mut());
-            },
+            }
             InsnKind::LocalGet(idx) => {
                 commands.append(Local_get(idx).as_mut());
-            },
+            }
             InsnKind::LocalSet(idx) => {
                 commands.append(Local_set(idx).as_mut());
-            },
+            }
             InsnKind::LocalTee(idx) => {
                 commands.append(Local_tee(idx).as_mut());
-            },
+            }
             InsnKind::BrIf(idx) => {
                 commands.append(br_if(context, idx).as_mut());
-            },
+            }
             InsnKind::Br(idx) => {
                 commands.append(br(context, idx).as_mut());
-            },
+            }
             InsnKind::Drop => {
                 commands.append(drop().as_mut());
-            },
+            }
             InsnKind::Select => {
                 commands.append(select().as_mut());
-            },
-            InsnKind::If { ty, then_body, else_body } => {
+            }
+            InsnKind::If {
+                ty,
+                then_body,
+                else_body,
+            } => {
                 commands.append(if_fn().as_mut());
-            },
+            }
             InsnKind::Call(fnidx) => {
                 commands.append(call(fnidx).as_mut());
-            },
-            InsnKind::BrTable { labels, default_label } => {
+            }
+            InsnKind::BrTable {
+                labels,
+                default_label,
+            } => {
                 commands.append(br_table().as_mut());
-            },
+            }
             InsnKind::Return => {
                 commands.append(return_fn().as_mut());
-            },
+            }
             InsnKind::CallIndirect(typidx) => {
                 commands.append(call_indirect(typidx).as_mut());
-            },
+            }
             InsnKind::GlobalGet(globalidx) => {
                 commands.append(global_get(globalidx).as_mut());
-            },
+            }
             InsnKind::GlobalSet(globalidx) => {
                 commands.append(global_set(globalidx).as_mut());
-            },
+            }
             InsnKind::I32Load8S(mem) => {
                 commands.append(i32_load_8s(mem).as_mut());
-            },
+            }
             InsnKind::I32Load8U(mem) => {
                 commands.append(i32_load_8u(mem).as_mut());
-            },
+            }
             InsnKind::I64Load8S(mem) => {
                 commands.append(i64_load_8s(mem).as_mut());
-            },
+            }
             InsnKind::I64Load8U(mem) => {
                 commands.append(i64_load_8u(mem).as_mut());
-            },
+            }
             InsnKind::I32Load16S(mem) => {
                 commands.append(i32_load_16s(mem).as_mut());
-
-            },
+            }
             InsnKind::I32Load16U(mem) => {
                 commands.append(i32_load_16u(mem).as_mut());
-
-            },
+            }
             InsnKind::I64Load16S(mem) => {
                 commands.append(i64_load_16s(mem).as_mut());
-
-            },
+            }
             InsnKind::I64Load16U(mem) => {
                 commands.append(i64_load_16u(mem).as_mut());
-            },
+            }
             InsnKind::I64Load32S(mem) => {
                 commands.append(i64_load_32s(mem).as_mut());
-
-            },
+            }
             InsnKind::I64Load32U(mem) => {
                 commands.append(i64_load_32u(mem).as_mut());
-            },
+            }
             InsnKind::I32Load(mem) => {
                 commands.append(i32_load(mem).as_mut());
-
-            },
+            }
             InsnKind::I64Load(mem) => {
                 commands.append(i64_load(mem).as_mut());
-            },
+            }
             InsnKind::I32Store(mem) => {
                 commands.append(i32_store(mem).as_mut());
-
-            },
+            }
             InsnKind::I64Store(mem) => {
                 commands.append(i64_store(mem).as_mut());
-            },
+            }
             InsnKind::I32Store8(mem) => {
                 commands.append(i32_store8(mem).as_mut());
-            },
+            }
             InsnKind::I32Store16(mem) => {
                 commands.append(i32_store16(mem).as_mut());
-            },
+            }
             InsnKind::I64Store8(mem) => {
                 commands.append(i64_store8(mem).as_mut());
-            },
+            }
             InsnKind::I64Store16(mem) => {
                 commands.append(i64_store16(mem).as_mut());
-            },
+            }
             InsnKind::I64Store32(mem) => {
                 commands.append(i64_store32(mem).as_mut());
-            },
+            }
             InsnKind::MemorySize => {
                 commands.append(memory_size().as_mut());
-            },
+            }
             InsnKind::MemoryGrow => {
                 commands.append(memory_grow().as_mut());
-            },
-            InsnKind::I32Const(c ) => {
+            }
+            InsnKind::I32Const(c) => {
                 commands.append(i32_const_fn(c).as_mut());
-            },
-            InsnKind::I64Const(c ) => {
+            }
+            InsnKind::I64Const(c) => {
                 commands.append(i64_const_fn(c).as_mut());
-            },
+            }
             InsnKind::I32WrapI64 => {
                 commands.append(i32_wrap_i64().as_mut());
-            },
+            }
             InsnKind::I64ExtendI32S => {
                 commands.append(i64_extend_i32s().as_mut());
-            },
+            }
             InsnKind::I64ExtendI32U => {
                 commands.append(i64_extend_i32u().as_mut());
-            },
-            _ => { 
+            }
+            _ => {
                 commands.push(AbstractOp::Op(Op::Invalid));
-            },
+            }
         };
     }
 
@@ -492,7 +579,8 @@ fn i64_const_fn(c: &i64) -> Vec<AbstractOp> {
 fn call(fnidx: &u32) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Invalid));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(*fnidx as u32))));
+    result.push(AbstractOp::Op(Op::Call));
 
     result
 }
@@ -672,8 +760,10 @@ fn i64_store32(mem: &Mem) -> Vec<AbstractOp> {
     result
 }
 
-fn i32Add () -> Vec<AbstractOp> {
+fn i32Add() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    //result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+    //result.push(AbstractOp::Op(Op::Push1(Imm::from(4 as u8))));
 
     result.push(AbstractOp::Op(Op::Add));
     result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
@@ -682,7 +772,7 @@ fn i32Add () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Add () -> Vec<AbstractOp>{
+fn i64Add() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Add));
@@ -723,7 +813,7 @@ fn i64_load_32u(mem: &Mem) -> Vec<AbstractOp> {
 
     result
 }
-fn i32Sub () -> Vec<AbstractOp> {
+fn i32Sub() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -735,7 +825,7 @@ fn i32Sub () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Sub () -> Vec<AbstractOp> {
+fn i64Sub() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -747,9 +837,7 @@ fn i64Sub () -> Vec<AbstractOp> {
     result
 }
 
-
-
-fn i32Mul () -> Vec<AbstractOp> {
+fn i32Mul() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Mul));
@@ -759,7 +847,7 @@ fn i32Mul () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Mul () -> Vec<AbstractOp> {
+fn i64Mul() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Mul));
@@ -769,7 +857,7 @@ fn i64Mul () -> Vec<AbstractOp> {
     result
 }
 
-fn i32And () -> Vec<AbstractOp> {
+fn i32And() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::And));
@@ -779,7 +867,7 @@ fn i32And () -> Vec<AbstractOp> {
     result
 }
 
-fn i64And () -> Vec<AbstractOp> {
+fn i64And() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::And));
@@ -789,7 +877,7 @@ fn i64And () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Or () -> Vec<AbstractOp> {
+fn i32Or() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Or));
@@ -799,7 +887,7 @@ fn i32Or () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Or () -> Vec<AbstractOp> {
+fn i64Or() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Or));
@@ -809,7 +897,7 @@ fn i64Or () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Xor () -> Vec<AbstractOp> {
+fn i32Xor() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Xor));
@@ -819,7 +907,7 @@ fn i32Xor () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Xor () -> Vec<AbstractOp> {
+fn i64Xor() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Xor));
@@ -829,7 +917,8 @@ fn i64Xor () -> Vec<AbstractOp> {
     result
 }
 
-fn eq () -> Vec<AbstractOp> { //TODO might be wrong
+fn eq() -> Vec<AbstractOp> {
+    //TODO might be wrong
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Eq));
@@ -837,7 +926,7 @@ fn eq () -> Vec<AbstractOp> { //TODO might be wrong
     result
 }
 
-fn eqz () -> Vec<AbstractOp> {
+fn eqz() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::IsZero));
@@ -845,7 +934,8 @@ fn eqz () -> Vec<AbstractOp> {
     result
 }
 
-fn ne () -> Vec<AbstractOp> { //TODO might be wrong 
+fn ne() -> Vec<AbstractOp> {
+    //TODO might be wrong
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Eq));
@@ -855,7 +945,7 @@ fn ne () -> Vec<AbstractOp> { //TODO might be wrong
     result
 }
 
-fn extend8s () -> Vec<AbstractOp> {
+fn extend8s() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(0xff as u8))));
@@ -868,7 +958,7 @@ fn extend8s () -> Vec<AbstractOp> {
     result
 }
 
-fn extend16s () -> Vec<AbstractOp> {
+fn extend16s() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push2(Imm::from(0xffff as u16))));
@@ -881,7 +971,7 @@ fn extend16s () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Lts () -> Vec<AbstractOp> {
+fn i32Lts() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
@@ -894,7 +984,7 @@ fn i32Lts () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Lts () -> Vec<AbstractOp> {
+fn i64Lts() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
@@ -907,7 +997,7 @@ fn i64Lts () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Gts () -> Vec<AbstractOp> {
+fn i32Gts() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
@@ -921,7 +1011,7 @@ fn i32Gts () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Gts () -> Vec<AbstractOp> {
+fn i64Gts() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
@@ -935,7 +1025,7 @@ fn i64Gts () -> Vec<AbstractOp> {
     result
 }
 
-fn Leu () -> Vec<AbstractOp> {
+fn Leu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -948,9 +1038,8 @@ fn Leu () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Or));
 
     result
-
 }
-fn Geu () -> Vec<AbstractOp> {
+fn Geu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -965,7 +1054,7 @@ fn Geu () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Ges () -> Vec<AbstractOp> {
+fn i32Ges() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
@@ -984,7 +1073,7 @@ fn i32Ges () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Ges () -> Vec<AbstractOp> {
+fn i64Ges() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
@@ -1003,7 +1092,7 @@ fn i64Ges () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Les () -> Vec<AbstractOp> {
+fn i32Les() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
@@ -1023,7 +1112,7 @@ fn i32Les () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Les () -> Vec<AbstractOp> {
+fn i64Les() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
@@ -1043,7 +1132,7 @@ fn i64Les () -> Vec<AbstractOp> {
     result
 }
 
-fn Divu () -> Vec<AbstractOp> {
+fn Divu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1052,9 +1141,9 @@ fn Divu () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Divs () -> Vec<AbstractOp> {
+fn i32Divs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-    
+
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1067,9 +1156,9 @@ fn i32Divs () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Divs () -> Vec<AbstractOp> {
+fn i64Divs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-    
+
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1082,7 +1171,7 @@ fn i64Divs () -> Vec<AbstractOp> {
     result
 }
 
-fn Remu () -> Vec<AbstractOp> {
+fn Remu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1091,7 +1180,7 @@ fn Remu () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Rems () -> Vec<AbstractOp> {
+fn i32Rems() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
@@ -1106,7 +1195,7 @@ fn i32Rems () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Rems () -> Vec<AbstractOp> {
+fn i64Rems() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
@@ -1117,47 +1206,47 @@ fn i64Rems () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::SMod));
-    
+
     result
 }
 
-fn i32Gtu () -> Vec<AbstractOp> {
+fn i32Gtu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Gt));
-    
+
     result
 }
 
-fn i64Gtu () -> Vec<AbstractOp> {
+fn i64Gtu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Gt));
-    
+
     result
 }
 
-fn i32Ltu () -> Vec<AbstractOp> {
+fn i32Ltu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-    
+
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Lt));
-    
+
     result
 }
 
-fn i64Ltu () -> Vec<AbstractOp> {
+fn i64Ltu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-    
+
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Lt));
-    
+
     result
 }
 
-fn i32Shrs () -> Vec<AbstractOp> {
+fn i32Shrs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(20 as u8))));
@@ -1174,7 +1263,7 @@ fn i32Shrs () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Shrs () -> Vec<AbstractOp> {
+fn i64Shrs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(40 as u8))));
@@ -1191,7 +1280,7 @@ fn i64Shrs () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Rotl () -> Vec<AbstractOp> {
+fn i32Rotl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1199,7 +1288,7 @@ fn i32Rotl () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Rotl () -> Vec<AbstractOp> {
+fn i64Rotl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1207,7 +1296,7 @@ fn i64Rotl () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Rotr () -> Vec<AbstractOp> {
+fn i32Rotr() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1215,7 +1304,7 @@ fn i32Rotr () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Rotr () -> Vec<AbstractOp> {
+fn i64Rotr() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1223,7 +1312,7 @@ fn i64Rotr () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Popcnt () -> Vec<AbstractOp> {
+fn i32Popcnt() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
@@ -1231,7 +1320,7 @@ fn i32Popcnt () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Popcnt () -> Vec<AbstractOp> {
+fn i64Popcnt() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
@@ -1239,7 +1328,7 @@ fn i64Popcnt () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Ctz () -> Vec<AbstractOp> {
+fn i32Ctz() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
@@ -1247,7 +1336,7 @@ fn i32Ctz () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Ctz () -> Vec<AbstractOp> {
+fn i64Ctz() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
@@ -1255,7 +1344,7 @@ fn i64Ctz () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Clz () -> Vec<AbstractOp> {
+fn i32Clz() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
@@ -1263,7 +1352,7 @@ fn i32Clz () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Clz () -> Vec<AbstractOp> {
+fn i64Clz() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
@@ -1271,7 +1360,7 @@ fn i64Clz () -> Vec<AbstractOp> {
     result
 }
 
-fn i32Shru () -> Vec<AbstractOp> {
+fn i32Shru() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(20 as u8))));
@@ -1284,7 +1373,7 @@ fn i32Shru () -> Vec<AbstractOp> {
     result
 }
 
-fn i64Shru () -> Vec<AbstractOp> {
+fn i64Shru() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(40 as u8))));
@@ -1293,7 +1382,7 @@ fn i64Shru () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Shr));
     result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
-    
+
     result
 }
 
@@ -1303,11 +1392,11 @@ fn Shr() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Shr));
     result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
-    
+
     result
 }
 
-fn i32Shl () -> Vec<AbstractOp> {
+fn i32Shl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(20 as u8))));
@@ -1316,11 +1405,11 @@ fn i32Shl () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Shl));
     result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
-    
+
     result
 }
 
-fn i64Shl () -> Vec<AbstractOp> {
+fn i64Shl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(40 as u8))));
@@ -1329,11 +1418,11 @@ fn i64Shl () -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Shl));
     result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
-    
+
     result
 }
 
-fn Nop () -> Vec<AbstractOp> {
+fn Nop() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1341,7 +1430,7 @@ fn Nop () -> Vec<AbstractOp> {
     result
 }
 
-fn unreachable () -> Vec<AbstractOp> {
+fn unreachable() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Invalid));
@@ -1349,7 +1438,7 @@ fn unreachable () -> Vec<AbstractOp> {
     result
 }
 
-fn Local_get (idx: &u32) -> Vec<AbstractOp> {
+fn Local_get(idx: &u32) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
@@ -1358,7 +1447,7 @@ fn Local_get (idx: &u32) -> Vec<AbstractOp> {
     result
 }
 
-fn Local_set (idx: &u32) -> Vec<AbstractOp> {
+fn Local_set(idx: &u32) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
@@ -1367,7 +1456,7 @@ fn Local_set (idx: &u32) -> Vec<AbstractOp> {
     result
 }
 
-fn Local_tee (idx: &u32) -> Vec<AbstractOp> {
+fn Local_tee(idx: &u32) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Dup1));
@@ -1377,25 +1466,29 @@ fn Local_tee (idx: &u32) -> Vec<AbstractOp> {
     result
 }
 
-fn br_if (context: &Context, idx: &u32) -> Vec<AbstractOp> {
+fn br_if(context: &Context, idx: &u32) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(context.labels.get(*idx as usize).unwrap()))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+        context.labels.get(*idx as usize).unwrap(),
+    ))));
     result.push(AbstractOp::Op(Op::JumpI));
 
     result
 }
 
-fn br (context: &Context, idx: &u32) -> Vec<AbstractOp> {
+fn br(context: &Context, idx: &u32) -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(context.labels.get(*idx as usize).unwrap()))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+        context.labels.get(*idx as usize).unwrap(),
+    ))));
     result.push(AbstractOp::Op(Op::Jump));
 
     result
 }
 
-fn drop () -> Vec<AbstractOp> {
+fn drop() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
@@ -1403,16 +1496,20 @@ fn drop () -> Vec<AbstractOp> {
     result
 }
 
-fn select () -> Vec<AbstractOp> {
+fn select() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
     let mut rng = rand::thread_rng();
     let random_nonzero: u32 = rng.gen();
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(random_nonzero.to_string()))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+        random_nonzero.to_string(),
+    ))));
     result.push(AbstractOp::Op(Op::JumpI));
     result.push(AbstractOp::Op(Op::Pop));
 
     let random_exit: u32 = rng.gen();
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(random_exit.to_string()))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+        random_exit.to_string(),
+    ))));
     result.push(AbstractOp::Op(Op::Jump));
 
     result.push(AbstractOp::Label(random_nonzero.to_string()));
