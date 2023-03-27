@@ -1,36 +1,47 @@
 extern crate wain_syntax_binary;
 mod revm_run;
+use ethabi::{encode, Token};
 use etk_asm::asm::Assembler;
 use etk_asm::ops::AbstractOp;
 use etk_asm::ops::Imm;
 use etk_asm::ops::Op;
+use primitive_types::U256;
 use rand::Rng;
-use revm_primitives::ExecutionResult;
-use std::fs;
-use std::iter::Map;
-use std::ops::Add;
-use wain_exec::trap::{Result, Trap, TrapReason};
-use wain_exec::Value;
-use wain_syntax_binary::parse;
-use wain_validate::validate;
-
 use revm::db::CacheDB;
 use revm::db::EmptyDB;
 use revm::InMemoryDB;
+use revm_primitives::ExecutionResult;
 use std::collections::HashMap;
+use std::fs;
 use wain_ast::FuncKind;
 use wain_ast::*;
-use wain_exec::DefaultImporter;
-use wain_exec::Importer;
+use wain_exec::trap::Result;
+use wain_syntax_binary::parse;
+
 #[derive(Debug)]
 pub struct Context {
     labels: Vec<String>,
+}
+
+pub enum Value {
+    I32(i32),
+    I64(i64),
+    U32(u32),
+    U64(u64),
 }
 
 pub struct Runner<'module, 'source> {
     module: &'module Module<'source>,
     functions: HashMap<String, String>,
     db: CacheDB<EmptyDB>,
+}
+macro_rules! to_big_endian {
+    ($e:expr) => {{
+        let u256 = U256::from(*$e);
+        let mut big_endian_bytes: [u8; 32] = [0; 32];
+        u256.to_big_endian(&mut big_endian_bytes);
+        &hex::encode(&big_endian_bytes)
+    }};
 }
 
 impl<'m, 's> Runner<'m, 's> {
@@ -111,13 +122,24 @@ impl<'m, 's> Runner<'m, 's> {
         }
         Ok(runtime)
     }
-
     pub fn invoke(&mut self, args: &[Value]) -> Option<ExecutionResult> {
         let mut arguments = String::new();
         for args in args {
             match args {
-                Value::I32(e) => arguments += &format!("{:0>64}", e),
-                _ => {}
+                Value::U32(e) => {
+                    arguments += to_big_endian!(e);
+                }
+                Value::U64(e) => {
+                    arguments += to_big_endian!(e);
+
+                }
+                Value::I32(e) => {
+                    arguments += to_big_endian!(e);
+
+                }
+                Value::I64(e) => {
+                    arguments += to_big_endian!(e);
+                }
             };
         }
         return Some(revm_run::call_contract(
@@ -145,7 +167,7 @@ fn main() {
             };
 
             println!("functions {:#?}", runtime.functions);
-            match runtime.invoke(&[Value::I32(5), Value::I32(2)]) {
+            match runtime.invoke(&[Value::U32(8), Value::U64(1)]) {
                 Some(ret) => {
                     println!("result = {:?}", ret);
                 }

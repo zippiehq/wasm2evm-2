@@ -3,15 +3,13 @@ use revm::db::CacheDB;
 use revm::{
     db::in_memory_db::{EmptyDB, InMemoryDB},
     interpreter::{
-        analysis::to_analysed, BytecodeLocked, CallInputs, Contract, Gas, InstructionResult,
+        analysis::to_analysed, CallInputs, Contract, Gas, InstructionResult,
         Interpreter,
     },
     primitives::{Bytecode, LatestSpec, TransactTo},
     EVMData, Inspector, EVM,
 };
-use revm_primitives::Address;
 use revm_primitives::ExecutionResult;
-use std::str::FromStr;
 struct Inspect {}
 
 impl Inspector<InMemoryDB> for Inspect {
@@ -58,7 +56,6 @@ pub fn deploy_contract(hex: String) -> (ExecutionResult, String, Option<CacheDB<
     evm.env.tx.transact_to = TransactTo::create();
 
     evm.env.tx.data = contract_data.clone();
-    let bytecode_raw = to_analysed::<LatestSpec>(Bytecode::new_raw(contract_data.clone()));
 
     evm.env.cfg.perf_all_precompiles_have_balance = true;
     evm.database(InMemoryDB::new(EmptyDB::default()));
