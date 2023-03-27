@@ -7,18 +7,21 @@ use etk_asm::ops::Op;
 use rand::Rng;
 use revm_primitives::ExecutionResult;
 use std::fs;
+use std::iter::Map;
 use std::ops::Add;
 use wain_exec::trap::{Result, Trap, TrapReason};
 use wain_exec::Value;
 use wain_syntax_binary::parse;
 use wain_validate::validate;
 
+use revm::db::CacheDB;
+use revm::db::EmptyDB;
+use revm::InMemoryDB;
+use std::collections::HashMap;
 use wain_ast::FuncKind;
 use wain_ast::*;
 use wain_exec::DefaultImporter;
 use wain_exec::Importer;
-use wain_exec::Stack;
-
 #[derive(Debug)]
 pub struct Context {
     labels: Vec<String>,
@@ -26,63 +29,50 @@ pub struct Context {
 
 pub struct Runner<'module, 'source> {
     module: &'module Module<'source>,
+    functions: HashMap<String, String>,
+    db: CacheDB<EmptyDB>,
 }
 
 impl<'m, 's> Runner<'m, 's> {
     pub fn instantiate(module: &'m Module<'s>) -> Result<Self> {
         let mut runtime = Self {
             module: module,
+            functions: HashMap::new(),
+            db: InMemoryDB::new(EmptyDB::default()),
         };
 
-        Ok(runtime)
-    }
-
-    pub fn invoke(&mut self, name: impl AsRef<str>, args: &[Value]) -> Option<ExecutionResult> {
-        fn find_func_to_invoke<'s>(
-            name: &str,
-            exports: &[wain_ast::Export<'s>],
-        ) -> Option<(u32, usize)> {
+        fn find_func_name_by_id<'s>(id: u32, exports: &[Export<'s>]) -> Option<String> {
             for export in exports {
-                if export.name.0 == name {
-                    match export.kind {
-                        wain_ast::ExportKind::Func(idx) => return Some((idx, export.start)),
-                        _ => return None,
-                    };
-                }
+                match export.kind {
+                    wain_ast::ExportKind::Func(idx) => {
+                        if idx == id {
+                            return Some(export.name.0.to_string());
+                        }
+                    }
+                    _ => {}
+                };
             }
             None
         }
-        let mut commands: Vec<AbstractOp> = Vec::new();
+        for funcs in &module.funcs {
+            let mut commands: Vec<AbstractOp> = Vec::new();
 
-        for funcs in &self.module.funcs {
-            if funcs.idx
-                == find_func_to_invoke(name.as_ref(), &self.module.exports)
-                    .unwrap()
-                    .0
-            {
-                let mut globals: Context = Context { labels: Vec::new() };
+            let mut globals: Context = Context { labels: Vec::new() };
 
-                let length = &self
-                    .module
-                    .types
-                    .get(funcs.idx as usize)
-                    .unwrap()
-                    .params
-                    .len();
-                commands.push(AbstractOp::Op(Op::Push2(Imm::from(
-                    *length as u16 * 0x20 as u16,
-                ))));
+            let length = module.types.get(funcs.idx as usize).unwrap().params.len();
+            commands.push(AbstractOp::Op(Op::Push2(Imm::from(
+                length as u16 * 0x20 as u16,
+            ))));
 
-                commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-                commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+            commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+            commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
 
-                commands.push(AbstractOp::Op(Op::CallDataCopy));
+            commands.push(AbstractOp::Op(Op::CallDataCopy));
 
-                match &funcs.kind {
-                    FuncKind::Import(s) => {}
-                    FuncKind::Body { locals, expr } => {
-                        commands.append(instructions_handler(expr, &mut globals).as_mut());
-                    }
+            match &funcs.kind {
+                FuncKind::Import(s) => {}
+                FuncKind::Body { locals, expr } => {
+                    commands.append(instructions_handler(expr, &mut globals).as_mut());
                 }
             }
             commands.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
@@ -110,20 +100,31 @@ impl<'m, 's> Runner<'m, 's> {
             asm2.finish().unwrap();
             assert!(15 == output2.len());
             output2.append(&mut output);
+            let address = revm_run::deploy_contract(hex::encode(output2.clone()));
 
-            let mut arguments = String::new();
-            for args in args {
-                match args {
-                    Value::I32(e) => arguments += &format!("{:0>64}", e),
-                    _ => {}
-                };
-            }
-            return Some(revm_run::deploy_contract(
-                hex::encode(output2.clone()),
-                arguments.to_string(),
-            ));
+            println!("result {:#?}", address.0);
+            runtime.functions.insert(
+                find_func_name_by_id(funcs.idx, &module.exports).unwrap(),
+                address.1,
+            );
+            runtime.db = address.2.unwrap();
         }
-        None
+        Ok(runtime)
+    }
+
+    pub fn invoke(&mut self, args: &[Value]) -> Option<ExecutionResult> {
+        let mut arguments = String::new();
+        for args in args {
+            match args {
+                Value::I32(e) => arguments += &format!("{:0>64}", e),
+                _ => {}
+            };
+        }
+        return Some(revm_run::call_contract(
+            self.functions.get("add").unwrap().clone(),
+            arguments.to_string(),
+            self.db.clone(),
+        ));
     }
 }
 
@@ -143,7 +144,8 @@ fn main() {
                 }
             };
 
-            match runtime.invoke("add", &[Value::I32(1), Value::I32(2)]) {
+            println!("functions {:#?}", runtime.functions);
+            match runtime.invoke(&[Value::I32(5), Value::I32(2)]) {
                 Some(ret) => {
                     println!("result = {:?}", ret);
                 }
@@ -152,26 +154,6 @@ fn main() {
         }
         Err(err) => eprintln!("Error! {}", err),
     };
-    let mut asm = Assembler::new();
-    asm.push_all(commands).unwrap();
-    let mut output = asm.take();
-    asm.finish().unwrap();
-    let mut deployment: Vec<AbstractOp> = Vec::new();
-    deployment.push(AbstractOp::Op(Op::Push2(Imm::from(output.len() as u16))));
-    deployment.push(AbstractOp::Op(Op::Push1(Imm::from(15 as u8))));
-    deployment.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-    deployment.push(AbstractOp::Op(Op::CodeCopy));
-    deployment.push(AbstractOp::Op(Op::Push2(Imm::from(output.len() as u16))));
-    deployment.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-    deployment.push(AbstractOp::Op(Op::Return));
-    deployment.push(AbstractOp::Op(Op::Stop));
-    let mut asm2 = Assembler::new();
-    asm2.push_all(deployment).unwrap();
-    let mut output2 = asm2.take();
-    asm2.finish().unwrap();
-    assert!(15 == output2.len());
-    output2.append(&mut output);
-    revm_run::deploy_contract(hex::encode(output2.clone()), "00000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000032".to_string());
 }
 
 fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<AbstractOp> {

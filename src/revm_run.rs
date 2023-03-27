@@ -1,21 +1,26 @@
 use bytes::Bytes;
+use revm::db::CacheDB;
 use revm::{
-    Inspector,
-    EVMData,
-    db::in_memory_db::{InMemoryDB, EmptyDB},
-    interpreter::{analysis::to_analysed, BytecodeLocked, Contract, Gas, Interpreter, InstructionResult, CallInputs},
-    primitives::{LatestSpec, Bytecode, TransactTo},
-    EVM, 
+    db::in_memory_db::{EmptyDB, InMemoryDB},
+    interpreter::{
+        analysis::to_analysed, BytecodeLocked, CallInputs, Contract, Gas, InstructionResult,
+        Interpreter,
+    },
+    primitives::{Bytecode, LatestSpec, TransactTo},
+    EVMData, Inspector, EVM,
 };
+use revm_primitives::Address;
 use revm_primitives::ExecutionResult;
-
-struct Inspect {
-
-}
+use std::str::FromStr;
+struct Inspect {}
 
 impl Inspector<InMemoryDB> for Inspect {
-    
-    fn step(&mut self,_interp: &mut Interpreter,_data: &mut EVMData<'_, InMemoryDB>,_is_static: bool) -> InstructionResult {
+    fn step(
+        &mut self,
+        _interp: &mut Interpreter,
+        _data: &mut EVMData<'_, InMemoryDB>,
+        _is_static: bool,
+    ) -> InstructionResult {
         unsafe {
             //println!("instr pointer on each step: {:#?}", *(_interp.instruction_pointer));
         }
@@ -41,11 +46,10 @@ impl Inspector<InMemoryDB> for Inspect {
 
         (InstructionResult::Continue, Gas::new(0), Bytes::new())
     }
-    
 }
 use revm_primitives::create_address;
-pub fn deploy_contract(hex: String, args: String) -> ExecutionResult {
-    let contract_data : Bytes = hex::decode(hex).unwrap().into();
+pub fn deploy_contract(hex: String) -> (ExecutionResult, String, Option<CacheDB<EmptyDB>>) {
+    let contract_data: Bytes = hex::decode(hex).unwrap().into();
     let mut evm: EVM<InMemoryDB> = revm::new();
     evm.env.tx.caller = "0x1000000000000000000000000000000000000000"
         .parse()
@@ -61,20 +65,30 @@ pub fn deploy_contract(hex: String, args: String) -> ExecutionResult {
 
     let env = evm.env.clone();
     evm.env.tx.nonce = Some(0);
-    let result = evm.inspect_commit::<Inspect>(Inspect{}).unwrap();
+    let result = evm.inspect_commit::<Inspect>(Inspect {}).unwrap();
     let contract_address = create_address(evm.env.tx.caller, 0);
-
     let contract = Contract {
-        address : contract_address,
+        address: contract_address,
         ..Default::default()
     };
 
-    evm.env.tx.transact_to = TransactTo::Call(
-        contract_address,
-    );
-    evm.env.tx.data = hex::decode(args).unwrap().into();
-    evm.env.tx.nonce = Some(1);
-    let result = evm.inspect_commit::<Inspect>(Inspect{}).unwrap();
-    return result;
+    return (result, format!("0x{:x}", contract_address), evm.db);
+}
 
+pub fn call_contract(
+    contract_address: String,
+    data: String,
+    db: CacheDB<EmptyDB>,
+) -> ExecutionResult {
+    let mut evm: EVM<InMemoryDB> = revm::new();
+    evm.env.tx.caller = "0x1000000000000000000000000000000000000000"
+        .parse()
+        .unwrap();
+    evm.env.tx.transact_to = TransactTo::Call(contract_address.parse().unwrap());
+    evm.env.tx.data = hex::decode(data).unwrap().into();
+    evm.env.tx.nonce = Some(1);
+    evm.env.cfg.perf_all_precompiles_have_balance = true;
+    evm.database(db);
+    let result = evm.inspect_commit::<Inspect>(Inspect {}).unwrap();
+    result
 }
