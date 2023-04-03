@@ -13,12 +13,14 @@ mod runtime;
 mod stack;
 mod table;
 mod value;
+mod revm_run;
 
 pub use import::{
     check_func_signature, DefaultImporter, ImportInvalidError, ImportInvokeError, Importer,
 };
 pub use memory::Memory;
 pub use runtime::Runtime;
+
 pub use stack::Stack;
 pub use value::Value;
 

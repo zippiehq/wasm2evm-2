@@ -49,6 +49,9 @@ members = [
     "wain-validate",
     "wain-exec",
     "spec-test",
+    "spec-test-runner",
+    "wasm-reader",
+
 ]
 
 [badges]

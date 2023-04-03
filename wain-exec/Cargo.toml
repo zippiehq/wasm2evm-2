@@ -19,7 +19,12 @@ no-dev-version = true
 
 [dependencies]
 wain-ast = { path = "../wain-ast", version = "0.2" }
-
+etk-asm = "0.2.1"
+hex = "0.4.3"
+rand = "0.8.5"
+bytes = "1.4"
+revm = "3.0.0"
+revm-primitives = "1.0.0"
 [dev-dependencies]
 wain-syntax-text = { path = "../wain-syntax-text", version = "0.2" }
 wain-validate = { path = "../wain-validate", version = "0.1" }
