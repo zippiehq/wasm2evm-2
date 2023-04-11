@@ -228,6 +228,15 @@ pub fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> V
             InsnKind::I32Ne => {
                 commands.append(ne().as_mut());
             }
+            InsnKind::I64Eq => {
+                commands.append(eq().as_mut());
+            }
+            InsnKind::I64Eqz => {
+                commands.append(eqz().as_mut());
+            }
+            InsnKind::I64Ne => {
+                commands.append(ne().as_mut());
+            }
             InsnKind::I32LtS => {
                 commands.append(i32Lts().as_mut());
             }
@@ -1459,9 +1468,11 @@ fn i64Ltu() -> Vec<AbstractOp> {
 fn i32Shrs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
     result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Mod));
+    result.push(AbstractOp::Op(Op::Swap1));
+
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1475,9 +1486,11 @@ fn i32Shrs() -> Vec<AbstractOp> {
 fn i64Shrs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(64 as u8))));
     result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Mod));
+    result.push(AbstractOp::Op(Op::Swap1));
+
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));

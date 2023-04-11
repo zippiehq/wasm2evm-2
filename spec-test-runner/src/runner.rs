@@ -505,13 +505,13 @@ impl<'a> Tester<'a> {
                     }
                     if !is_matches {
                         let actual = actual.as_ref();
-                            let result = i64::from_be_bytes([
-                                actual[24], actual[25], actual[26], actual[27], actual[28], actual[29],
+                            let result = i32::from_be_bytes([
+                                actual[28], actual[29],
                                 actual[30], actual[31]
                             ]);
                         return Err(Error::run_error(
                             RunKind::InvokeUnexpectedReturn {
-                                actual: Value::I64(result),
+                                actual: Value::I32(result),
                                 expected: expected.to_value().unwrap(),
                             },
                             self.source,
