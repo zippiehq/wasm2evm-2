@@ -18,11 +18,11 @@ use wain_ast::*;
 use wain_exec::trap::Result;
 use wain_syntax_binary::parse;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Context {
     labels: Vec<String>,
 }
-
+#[derive(Debug)]
 pub enum Value {
     I32(i32),
     I64(i64),
@@ -30,26 +30,28 @@ pub enum Value {
     U64(u64),
 }
 
-pub struct Runner<'module, 'source> {
-    module: &'module Module<'source>,
-    functions: HashMap<String, String>,
+pub struct Runtime<'module, 'source> {
+    pub module: &'module Module<'source>,
+    pub functions: HashMap<String, String>,
     db: CacheDB<EmptyDB>,
+    nonce: u64,
 }
 macro_rules! to_big_endian {
     ($e:expr) => {{
-        let u256 = U256::from(*$e);
+        let u256 = U256::from(*$e as u64);
         let mut big_endian_bytes: [u8; 32] = [0; 32];
         u256.to_big_endian(&mut big_endian_bytes);
         &hex::encode(&big_endian_bytes)
     }};
 }
 
-impl<'m, 's> Runner<'m, 's> {
+impl<'m, 's> Runtime<'m, 's> {
     pub fn instantiate(module: &'m Module<'s>) -> Result<Self> {
         let mut runtime = Self {
             module: module,
             functions: HashMap::new(),
             db: InMemoryDB::new(EmptyDB::default()),
+            nonce: 0,
         };
 
         fn find_func_name_by_id<'s>(id: u32, exports: &[Export<'s>]) -> Option<String> {
@@ -65,7 +67,11 @@ impl<'m, 's> Runner<'m, 's> {
             }
             None
         }
-        for funcs in &module.funcs {
+        println!("funcs idx {:#?}", &module.funcs);
+        println!("funcs idx {:#?}", &module.exports);
+
+        for i in 0..module.funcs.len() {
+            let funcs = module.funcs.get(i).unwrap();
             let mut commands: Vec<AbstractOp> = Vec::new();
 
             let mut globals: Context = Context { labels: Vec::new() };
@@ -111,18 +117,21 @@ impl<'m, 's> Runner<'m, 's> {
             asm2.finish().unwrap();
             assert!(15 == output2.len());
             output2.append(&mut output);
-            let address = revm_run::deploy_contract(hex::encode(output2.clone()));
-
-            println!("result {:#?}", address.0);
+            let address = revm_run::deploy_contract(
+                hex::encode(output2.clone()),
+                &mut runtime.nonce,
+                runtime.db,
+            );
             runtime.functions.insert(
-                find_func_name_by_id(funcs.idx, &module.exports).unwrap(),
+                find_func_name_by_id(i as u32, &module.exports).unwrap(),
                 address.1,
             );
             runtime.db = address.2.unwrap();
         }
+
         Ok(runtime)
     }
-    pub fn invoke(&mut self, args: &[Value]) -> Option<ExecutionResult> {
+    pub fn invoke(&mut self, name: &String, args: &[Value]) -> Option<ExecutionResult> {
         let mut arguments = String::new();
         for args in args {
             match args {
@@ -131,11 +140,9 @@ impl<'m, 's> Runner<'m, 's> {
                 }
                 Value::U64(e) => {
                     arguments += to_big_endian!(e);
-
                 }
                 Value::I32(e) => {
                     arguments += to_big_endian!(e);
-
                 }
                 Value::I64(e) => {
                     arguments += to_big_endian!(e);
@@ -143,42 +150,17 @@ impl<'m, 's> Runner<'m, 's> {
             };
         }
         return Some(revm_run::call_contract(
-            self.functions.get("add").unwrap().clone(),
+            self.functions.get(name).unwrap().clone(),
             arguments.to_string(),
             self.db.clone(),
+            &mut self.nonce,
         ));
     }
 }
 
 const BYTES8: u64 = 0xFFFFFFFFFFFFFFFF;
 const BYTES4: u32 = 0xFFFFFFFF;
-
-fn main() {
-    let source = fs::read("add.wasm").unwrap();
-    let mut commands: Vec<AbstractOp> = Vec::new();
-    match parse(&source) {
-        Ok(tree) => {
-            let mut runtime = match Runner::instantiate(&tree.module) {
-                Ok(m) => m,
-                Err(err) => {
-                    eprintln!("could not instantiate module: {}", err);
-                    panic!()
-                }
-            };
-
-            println!("functions {:#?}", runtime.functions);
-            match runtime.invoke(&[Value::U32(8), Value::U64(1)]) {
-                Some(ret) => {
-                    println!("result = {:?}", ret);
-                }
-                None => eprintln!("Execution was trapped"),
-            }
-        }
-        Err(err) => eprintln!("Error! {}", err),
-    };
-}
-
-fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<AbstractOp> {
+pub fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<AbstractOp> {
     let mut commands: Vec<AbstractOp> = Vec::new();
 
     for instr in body {
@@ -283,10 +265,10 @@ fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<A
                 commands.append(i64Ges().as_mut());
             }
             InsnKind::I32DivU => {
-                commands.append(Divu().as_mut());
+                commands.append(i32Divu().as_mut());
             }
             InsnKind::I64DivU => {
-                commands.append(Divu().as_mut());
+                commands.append(i64Divu().as_mut());
             }
             InsnKind::I32DivS => {
                 commands.append(i32Divs().as_mut());
@@ -295,10 +277,10 @@ fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<A
                 commands.append(i64Divs().as_mut());
             }
             InsnKind::I32RemU => {
-                commands.append(Remu().as_mut());
+                commands.append(i32Remu().as_mut());
             }
             InsnKind::I64RemU => {
-                commands.append(Remu().as_mut());
+                commands.append(i64Remu().as_mut());
             }
             InsnKind::I32RemS => {
                 commands.append(i32Rems().as_mut());
@@ -766,9 +748,6 @@ fn i64_store32(mem: &Mem) -> Vec<AbstractOp> {
 
 fn i32Add() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-    //result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    //result.push(AbstractOp::Op(Op::Push1(Imm::from(4 as u8))));
-
     result.push(AbstractOp::Op(Op::Add));
     result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
@@ -1106,7 +1085,6 @@ fn i32Les() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Dup2));
     result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
     result.push(AbstractOp::Op(Op::Eq));
     result.push(AbstractOp::Op(Op::Swap2));
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1126,7 +1104,6 @@ fn i64Les() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Dup2));
     result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
     result.push(AbstractOp::Op(Op::Eq));
     result.push(AbstractOp::Op(Op::Swap2));
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1136,26 +1113,124 @@ fn i64Les() -> Vec<AbstractOp> {
     result
 }
 
-fn Divu() -> Vec<AbstractOp> {
+fn i32Divu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Swap1));
+
+    result.push(AbstractOp::Op(Op::Div));
+
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    
+
+    result
+}
+
+fn i64Divu() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Div));
+
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
 
     result
 }
 
 fn i32Divs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Dup2));
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\x80\0\0\0".clone()))));
+    result.push(AbstractOp::Op(Op::Eq));
+    result.push(AbstractOp::Op(Op::Dup2));
+    
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone()))));
+    result.push(AbstractOp::Op(Op::Eq));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("integer_overflow"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
+    
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
+    
     result.push(AbstractOp::Op(Op::Swap1));
+
     result.push(AbstractOp::Op(Op::SDiv));
+    
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+
+    result.push(AbstractOp::Label("integer_overflow".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+
+    result.push(AbstractOp::Op(Op::Push16(Imm::from(b"integer overflow".clone()))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
 
     result
 }
@@ -1163,6 +1238,22 @@ fn i32Divs() -> Vec<AbstractOp> {
 fn i64Divs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
+    result.push(AbstractOp::Op(Op::Dup2));
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\0\0\0\0\0\0\0".clone()))));
+    result.push(AbstractOp::Op(Op::Eq));
+    result.push(AbstractOp::Op(Op::Dup2));
+    
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone()))));
+    result.push(AbstractOp::Op(Op::Eq));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("integer_overflow"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1172,20 +1263,92 @@ fn i64Divs() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::SDiv));
 
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("integer_overflow".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+
+    result.push(AbstractOp::Op(Op::Push16(Imm::from(b"integer overflow".clone()))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
     result
 }
 
-fn Remu() -> Vec<AbstractOp> {
+fn i32Remu() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
 
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Mod));
+
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+
+    result
+}
+
+fn i64Remu() -> Vec<AbstractOp> {
+    let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Mod));
+
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
 
     result
 }
 
 fn i32Rems() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
@@ -1195,6 +1358,17 @@ fn i32Rems() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::SMod));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
 
     result
 }
@@ -1202,6 +1376,11 @@ fn i32Rems() -> Vec<AbstractOp> {
 fn i64Rems() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
+    result.push(AbstractOp::Op(Op::Dup1));
+    result.push(AbstractOp::Op(Op::IsZero));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+    result.push(AbstractOp::Op(Op::JumpI));
+
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
@@ -1210,6 +1389,18 @@ fn i64Rems() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::SMod));
+
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+    result.push(AbstractOp::Op(Op::Jump));
+
+    result.push(AbstractOp::Label("div_by_zero".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
+    result.push(AbstractOp::Op(Op::Push22(Imm::from(
+        b"integer divide by zero".clone(),
+    ))));
+
+    result.push(AbstractOp::Label("end".to_string()));
+    result.push(AbstractOp::Op(Op::JumpDest));
 
     result
 }
@@ -1253,9 +1444,8 @@ fn i64Ltu() -> Vec<AbstractOp> {
 fn i32Shrs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(20 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+    result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
@@ -1270,9 +1460,8 @@ fn i32Shrs() -> Vec<AbstractOp> {
 fn i64Shrs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(40 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+    result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
@@ -1286,33 +1475,31 @@ fn i64Shrs() -> Vec<AbstractOp> {
 
 fn i32Rotl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    //TODO PrepareCall
+
     result
 }
 
 fn i64Rotl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    //TODO PrepareCall
     result
 }
 
 fn i32Rotr() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    //TODO PrepareCall
     result
 }
 
 fn i64Rotr() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
+    
+    result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    //TODO PrepareCall
     result
 }
 
@@ -1367,7 +1554,14 @@ fn i64Clz() -> Vec<AbstractOp> {
 fn i32Shru() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(20 as u8))));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Mod));
     result.push(AbstractOp::Op(Op::Shr));
@@ -1380,7 +1574,14 @@ fn i32Shru() -> Vec<AbstractOp> {
 fn i64Shru() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(40 as u8))));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+    result.push(AbstractOp::Op(Op::And));
+    result.push(AbstractOp::Op(Op::Swap1));
+
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(64 as u8))));
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Mod));
     result.push(AbstractOp::Op(Op::Shr));
@@ -1402,10 +1603,8 @@ fn Shr() -> Vec<AbstractOp> {
 
 fn i32Shl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(20 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(31 as u8))));
+    result.push(AbstractOp::Op(Op::And));
     result.push(AbstractOp::Op(Op::Shl));
     result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
     result.push(AbstractOp::Op(Op::And));
@@ -1416,13 +1615,11 @@ fn i32Shl() -> Vec<AbstractOp> {
 fn i64Shl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(40 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
+    result.push(AbstractOp::Op(Op::Push1(Imm::from(63 as u8))));
+    result.push(AbstractOp::Op(Op::And));
     result.push(AbstractOp::Op(Op::Shl));
     result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
     result.push(AbstractOp::Op(Op::And));
-
     result
 }
 
