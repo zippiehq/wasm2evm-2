@@ -1,0 +1,20 @@
+[package]
+name = "wasm-reader"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+wain-ast = { path = "../wain-ast" }
+wain-syntax-binary = "0"
+etk-asm = "0.2.1"
+hex = "0.4.3"
+rand = "0.8.5"
+bytes = "1.4"
+revm = "3.0.0"
+revm-primitives = "1.0.0"
+wain-validate = "0.1.4"
+wain-exec = { path = "../wain-exec" }
+primitive-types = "0.12.1"
+ethabi = "18.0.0"
