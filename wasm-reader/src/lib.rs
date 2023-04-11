@@ -1138,10 +1138,10 @@ fn i32Divu() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
-    
 
     result
 }
@@ -1172,6 +1172,7 @@ fn i64Divu() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1182,14 +1183,20 @@ fn i64Divu() -> Vec<AbstractOp> {
 fn i32Divs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
     result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\x80\0\0\0".clone()))));
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(
+        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\x80\0\0\0".clone(),
+    ))));
     result.push(AbstractOp::Op(Op::Eq));
     result.push(AbstractOp::Op(Op::Dup2));
-    
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone()))));
+
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(
+        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone(),
+    ))));
     result.push(AbstractOp::Op(Op::Eq));
     result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("integer_overflow"))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+        "integer_overflow",
+    ))));
     result.push(AbstractOp::Op(Op::JumpI));
 
     result.push(AbstractOp::Op(Op::Dup1));
@@ -1199,16 +1206,16 @@ fn i32Divs() -> Vec<AbstractOp> {
 
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
-    
+
     result.push(AbstractOp::Op(Op::Swap1));
     result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
     result.push(AbstractOp::Op(Op::SignExtend));
     result.push(AbstractOp::Op(Op::Swap1));
-    
+
     result.push(AbstractOp::Op(Op::Swap1));
 
     result.push(AbstractOp::Op(Op::SDiv));
-    
+
     result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
     result.push(AbstractOp::Op(Op::Jump));
 
@@ -1217,17 +1224,15 @@ fn i32Divs() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
-
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
-
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("integer_overflow".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::Push16(Imm::from(b"integer overflow".clone()))));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+    result.push(AbstractOp::Op(Op::Push16(Imm::from(
+        b"integer overflow".clone(),
+    ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1239,14 +1244,20 @@ fn i64Divs() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
 
     result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\0\0\0\0\0\0\0".clone()))));
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(
+        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\0\0\0\0\0\0\0".clone(),
+    ))));
     result.push(AbstractOp::Op(Op::Eq));
     result.push(AbstractOp::Op(Op::Dup2));
-    
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone()))));
+
+    result.push(AbstractOp::Op(Op::Push32(Imm::from(
+        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone(),
+    ))));
     result.push(AbstractOp::Op(Op::Eq));
     result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("integer_overflow"))));
+    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+        "integer_overflow",
+    ))));
     result.push(AbstractOp::Op(Op::JumpI));
 
     result.push(AbstractOp::Op(Op::Dup1));
@@ -1271,15 +1282,15 @@ fn i64Divs() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("integer_overflow".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::Push16(Imm::from(b"integer overflow".clone()))));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+    result.push(AbstractOp::Op(Op::Push16(Imm::from(
+        b"integer overflow".clone(),
+    ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1311,6 +1322,7 @@ fn i32Remu() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1336,6 +1348,7 @@ fn i64Remu() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1366,6 +1379,7 @@ fn i32Rems() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1398,6 +1412,7 @@ fn i64Rems() -> Vec<AbstractOp> {
     result.push(AbstractOp::Op(Op::Push22(Imm::from(
         b"integer divide by zero".clone(),
     ))));
+    result.push(AbstractOp::Op(Op::Revert));
 
     result.push(AbstractOp::Label("end".to_string()));
     result.push(AbstractOp::Op(Op::JumpDest));
@@ -1477,7 +1492,6 @@ fn i32Rotl() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
     result.push(AbstractOp::Op(Op::Invalid));
 
-
     result
 }
 
@@ -1497,7 +1511,7 @@ fn i32Rotr() -> Vec<AbstractOp> {
 
 fn i64Rotr() -> Vec<AbstractOp> {
     let mut result: Vec<AbstractOp> = Vec::new();
-    
+
     result.push(AbstractOp::Op(Op::Invalid));
 
     result
