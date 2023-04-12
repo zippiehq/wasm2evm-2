@@ -59,9 +59,6 @@ pub fn deploy_contract(hex: String) {
     let env = evm.env.clone();
     evm.env.tx.nonce = Some(0);
     let result = evm.inspect_commit::<Inspect>(Inspect{}).unwrap();
-
-    println!("tx {:#?}", evm.env.tx);
-    println!("{:#?}", result);
     let contract_address = create_address(evm.env.tx.caller, 0);
 
     let contract = Contract {
@@ -75,8 +72,4 @@ pub fn deploy_contract(hex: String) {
     evm.env.tx.data = hex::decode("00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001").unwrap().into();
     evm.env.tx.nonce = Some(1);
     let result = evm.inspect_commit::<Inspect>(Inspect{}).unwrap();
-
-    println!("tx {:#?}", evm.env.tx);
-    println!("{:?}", result);
-
 }

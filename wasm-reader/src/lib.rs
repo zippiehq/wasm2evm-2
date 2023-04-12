@@ -122,1631 +122,1655 @@ impl<'m, 's> Runtime<'m, 's> {
                 &mut runtime.nonce,
                 runtime.db,
             );
-            runtime.functions.insert(
-                find_func_name_by_id(i as u32, &module.exports).unwrap(),
-                address.1,
-            );
+            match find_func_name_by_id(i as u32, &module.exports) {
+                Some(func) => {
+                    println!("{}", func.clone());
+
+                    runtime.functions.insert(func, address.1);
+                }
+                _ => {}
+            }
             runtime.db = address.2.unwrap();
         }
 
         Ok(runtime)
     }
-    pub fn invoke(&mut self, name: &String, args: &[Value]) -> Option<ExecutionResult> {
-        let mut arguments = String::new();
-        for args in args {
-            match args {
-                Value::U32(e) => {
-                    arguments += to_big_endian!(e);
+
+    /*pub fn get_global(&self, name: &str) -> Option<Value> {
+        self.module
+            .exports
+            .iter()
+            .find_map(|e| match e.kind {
+                ExportKind::Global(idx) if e.name.0 == name => Some(idx),
+                _ => None,
+            })
+            .map(|idx| {
+                let ty = self.module.globals[idx as usize].ty;
+                get_any(self.module.globals.g, idx, ty)
+            })
+    }*/
+
+    //s}
+
+        pub fn invoke(&mut self, name: &String, args: &[Value]) -> Option<ExecutionResult> {
+            let mut arguments = String::new();
+            for args in args {
+                match args {
+                    Value::U32(e) => {
+                        arguments += to_big_endian!(e);
+                    }
+                    Value::U64(e) => {
+                        arguments += to_big_endian!(e);
+                    }
+                    Value::I32(e) => {
+                        arguments += to_big_endian!(e);
+                    }
+                    Value::I64(e) => {
+                        arguments += to_big_endian!(e);
+                    }
+                };
+            }
+            return Some(revm_run::call_contract(
+                self.functions.get(name).unwrap().clone(),
+                arguments.to_string(),
+                self.db.clone(),
+                &mut self.nonce,
+            ));
+        }
+    }
+
+    const BYTES8: u64 = 0xFFFFFFFFFFFFFFFF;
+    const BYTES4: u32 = 0xFFFFFFFF;
+    pub fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<AbstractOp> {
+        let mut commands: Vec<AbstractOp> = Vec::new();
+
+        for instr in body {
+            match &instr.kind {
+                InsnKind::Block { ty, body } => {
+                    let mut rng = rand::thread_rng();
+                    let id: u32 = rng.gen();
+                    context.labels.push(id.to_string());
+                    commands.append(instructions_handler(body, context).as_mut());
+                    commands.push(AbstractOp::Label(id.to_string()));
+                    commands.push(AbstractOp::Op(Op::JumpDest));
+                    context.labels.pop();
                 }
-                Value::U64(e) => {
-                    arguments += to_big_endian!(e);
+                InsnKind::Loop { ty, body } => {
+                    let mut rng = rand::thread_rng();
+                    let id: u32 = rng.gen();
+                    context.labels.push(id.to_string());
+                    commands.push(AbstractOp::Label(id.to_string()));
+                    commands.push(AbstractOp::Op(Op::JumpDest));
+                    commands.append(instructions_handler(body, context).as_mut());
+                    context.labels.pop();
                 }
-                Value::I32(e) => {
-                    arguments += to_big_endian!(e);
+                InsnKind::I32Add => {
+                    commands.append(i32Add().as_mut());
                 }
-                Value::I64(e) => {
-                    arguments += to_big_endian!(e);
+                InsnKind::I64Add => {
+                    commands.append(i64Add().as_mut());
+                }
+                InsnKind::I32Sub => {
+                    commands.append(i32Sub().as_mut());
+                }
+                InsnKind::I64Sub => {
+                    commands.append(i64Sub().as_mut());
+                }
+                InsnKind::I32Mul => {
+                    commands.append(i32Mul().as_mut());
+                }
+                InsnKind::I64Mul => {
+                    commands.append(i64Mul().as_mut());
+                }
+                InsnKind::I32And => {
+                    commands.append(i32And().as_mut());
+                }
+                InsnKind::I64And => {
+                    commands.append(i64And().as_mut());
+                }
+                InsnKind::I32Or => {
+                    commands.append(i32Or().as_mut());
+                }
+                InsnKind::I64Or => {
+                    commands.append(i64Or().as_mut());
+                }
+                InsnKind::I32Xor => {
+                    commands.append(i32Xor().as_mut());
+                }
+                InsnKind::I64Xor => {
+                    commands.append(i64Xor().as_mut());
+                }
+                InsnKind::I32Eq => {
+                    commands.append(eq().as_mut());
+                }
+                InsnKind::I32Eqz => {
+                    commands.append(eqz().as_mut());
+                }
+                InsnKind::I32Ne => {
+                    commands.append(ne().as_mut());
+                }
+                InsnKind::I64Eq => {
+                    commands.append(eq().as_mut());
+                }
+                InsnKind::I64Eqz => {
+                    commands.append(eqz().as_mut());
+                }
+                InsnKind::I64Ne => {
+                    commands.append(ne().as_mut());
+                }
+                InsnKind::I32LtS => {
+                    commands.append(i32Lts().as_mut());
+                }
+                InsnKind::I64LtS => {
+                    commands.append(i64Lts().as_mut());
+                }
+                InsnKind::I32GtS => {
+                    commands.append(i32Gts().as_mut());
+                }
+                InsnKind::I64GtS => {
+                    commands.append(i64Gts().as_mut());
+                }
+                InsnKind::I32LeU => {
+                    commands.append(Leu().as_mut());
+                }
+                InsnKind::I64LeU => {
+                    commands.append(Leu().as_mut());
+                }
+                InsnKind::I32GeU => {
+                    commands.append(Geu().as_mut());
+                }
+                InsnKind::I64GeU => {
+                    commands.append(Geu().as_mut());
+                }
+                InsnKind::I32LeS => {
+                    commands.append(i32Les().as_mut());
+                }
+                InsnKind::I64LeS => {
+                    commands.append(i64Les().as_mut());
+                }
+                InsnKind::I32GeS => {
+                    commands.append(i32Ges().as_mut());
+                }
+                InsnKind::I64GeS => {
+                    commands.append(i64Ges().as_mut());
+                }
+                InsnKind::I32DivU => {
+                    commands.append(i32Divu().as_mut());
+                }
+                InsnKind::I64DivU => {
+                    commands.append(i64Divu().as_mut());
+                }
+                InsnKind::I32DivS => {
+                    commands.append(i32Divs().as_mut());
+                }
+                InsnKind::I64DivS => {
+                    commands.append(i64Divs().as_mut());
+                }
+                InsnKind::I32RemU => {
+                    commands.append(i32Remu().as_mut());
+                }
+                InsnKind::I64RemU => {
+                    commands.append(i64Remu().as_mut());
+                }
+                InsnKind::I32RemS => {
+                    commands.append(i32Rems().as_mut());
+                }
+                InsnKind::I64RemS => {
+                    commands.append(i64Rems().as_mut());
+                }
+                InsnKind::I32GtU => {
+                    commands.append(i32Gtu().as_mut());
+                }
+                InsnKind::I64GtU => {
+                    commands.append(i64Gtu().as_mut());
+                }
+                InsnKind::I32LtU => {
+                    commands.append(i32Ltu().as_mut());
+                }
+                InsnKind::I64LtU => {
+                    commands.append(i64Ltu().as_mut());
+                }
+                InsnKind::I32ShrS => {
+                    commands.append(i32Shrs().as_mut());
+                }
+                InsnKind::I64ShrS => {
+                    commands.append(i64Shrs().as_mut());
+                }
+                InsnKind::I32Rotl => {
+                    commands.append(i32Rotl().as_mut());
+                }
+                InsnKind::I64Rotl => {
+                    commands.append(i64Rotl().as_mut());
+                }
+                InsnKind::I32Rotr => {
+                    commands.append(i32Rotr().as_mut());
+                }
+                InsnKind::I64Rotr => {
+                    commands.append(i64Rotr().as_mut());
+                }
+                InsnKind::I32Popcnt => {
+                    commands.append(i32Popcnt().as_mut());
+                }
+                InsnKind::I64Popcnt => {
+                    commands.append(i64Popcnt().as_mut());
+                }
+                InsnKind::I32Ctz => {
+                    commands.append(i32Ctz().as_mut());
+                }
+                InsnKind::I64Ctz => {
+                    commands.append(i64Ctz().as_mut());
+                }
+                InsnKind::I32Clz => {
+                    commands.append(i32Clz().as_mut());
+                }
+                InsnKind::I64Clz => {
+                    commands.append(i64Clz().as_mut());
+                }
+                InsnKind::I32ShrU => {
+                    commands.append(i32Shru().as_mut());
+                }
+                InsnKind::I64ShrU => {
+                    commands.append(i64Shru().as_mut());
+                }
+                InsnKind::I32Shl => {
+                    commands.append(i32Shl().as_mut());
+                }
+                InsnKind::I64Shl => {
+                    commands.append(i64Shl().as_mut());
+                }
+                InsnKind::Nop => {
+                    commands.append(Nop().as_mut());
+                }
+                InsnKind::Unreachable => {
+                    commands.append(unreachable().as_mut());
+                }
+                InsnKind::LocalGet(idx) => {
+                    commands.append(Local_get(idx).as_mut());
+                }
+                InsnKind::LocalSet(idx) => {
+                    commands.append(Local_set(idx).as_mut());
+                }
+                InsnKind::LocalTee(idx) => {
+                    commands.append(Local_tee(idx).as_mut());
+                }
+                InsnKind::BrIf(idx) => {
+                    commands.append(br_if(context, idx).as_mut());
+                }
+                InsnKind::Br(idx) => {
+                    commands.append(br(context, idx).as_mut());
+                }
+                InsnKind::Drop => {
+                    commands.append(drop_inst().as_mut());
+                }
+                InsnKind::Select => {
+                    commands.append(select().as_mut());
+                }
+                InsnKind::If {
+                    ty,
+                    then_body,
+                    else_body,
+                } => {
+                    commands.append(if_fn().as_mut());
+                }
+                InsnKind::Call(fnidx) => {
+                    commands.append(call(fnidx).as_mut());
+                }
+                InsnKind::BrTable {
+                    labels,
+                    default_label,
+                } => {
+                    commands.append(br_table().as_mut());
+                }
+                InsnKind::Return => {
+                    commands.append(return_fn().as_mut());
+                }
+                InsnKind::CallIndirect(typidx) => {
+                    commands.append(call_indirect(typidx).as_mut());
+                }
+                InsnKind::GlobalGet(globalidx) => {
+                    commands.append(global_get(globalidx).as_mut());
+                }
+                InsnKind::GlobalSet(globalidx) => {
+                    commands.append(global_set(globalidx).as_mut());
+                }
+                InsnKind::I32Load8S(mem) => {
+                    commands.append(i32_load_8s(mem).as_mut());
+                }
+                InsnKind::I32Load8U(mem) => {
+                    commands.append(i32_load_8u(mem).as_mut());
+                }
+                InsnKind::I64Load8S(mem) => {
+                    commands.append(i64_load_8s(mem).as_mut());
+                }
+                InsnKind::I64Load8U(mem) => {
+                    commands.append(i64_load_8u(mem).as_mut());
+                }
+                InsnKind::I32Load16S(mem) => {
+                    commands.append(i32_load_16s(mem).as_mut());
+                }
+                InsnKind::I32Load16U(mem) => {
+                    commands.append(i32_load_16u(mem).as_mut());
+                }
+                InsnKind::I64Load16S(mem) => {
+                    commands.append(i64_load_16s(mem).as_mut());
+                }
+                InsnKind::I64Load16U(mem) => {
+                    commands.append(i64_load_16u(mem).as_mut());
+                }
+                InsnKind::I64Load32S(mem) => {
+                    commands.append(i64_load_32s(mem).as_mut());
+                }
+                InsnKind::I64Load32U(mem) => {
+                    commands.append(i64_load_32u(mem).as_mut());
+                }
+                InsnKind::I32Load(mem) => {
+                    commands.append(i32_load(mem).as_mut());
+                }
+                InsnKind::I64Load(mem) => {
+                    commands.append(i64_load(mem).as_mut());
+                }
+                InsnKind::I32Store(mem) => {
+                    commands.append(i32_store(mem).as_mut());
+                }
+                InsnKind::I64Store(mem) => {
+                    commands.append(i64_store(mem).as_mut());
+                }
+                InsnKind::I32Store8(mem) => {
+                    commands.append(i32_store8(mem).as_mut());
+                }
+                InsnKind::I32Store16(mem) => {
+                    commands.append(i32_store16(mem).as_mut());
+                }
+                InsnKind::I64Store8(mem) => {
+                    commands.append(i64_store8(mem).as_mut());
+                }
+                InsnKind::I64Store16(mem) => {
+                    commands.append(i64_store16(mem).as_mut());
+                }
+                InsnKind::I64Store32(mem) => {
+                    commands.append(i64_store32(mem).as_mut());
+                }
+                InsnKind::MemorySize => {
+                    commands.append(memory_size().as_mut());
+                }
+                InsnKind::MemoryGrow => {
+                    commands.append(memory_grow().as_mut());
+                }
+                InsnKind::I32Const(c) => {
+                    commands.append(i32_const_fn(c).as_mut());
+                }
+                InsnKind::I64Const(c) => {
+                    commands.append(i64_const_fn(c).as_mut());
+                }
+                InsnKind::I32WrapI64 => {
+                    commands.append(i32_wrap_i64().as_mut());
+                }
+                InsnKind::I64ExtendI32S => {
+                    commands.append(i64_extend_i32s().as_mut());
+                }
+                InsnKind::I64ExtendI32U => {
+                    commands.append(i64_extend_i32u().as_mut());
+                }
+                _ => {
+                    commands.push(AbstractOp::Op(Op::Invalid));
                 }
             };
         }
-        return Some(revm_run::call_contract(
-            self.functions.get(name).unwrap().clone(),
-            arguments.to_string(),
-            self.db.clone(),
-            &mut self.nonce,
-        ));
+
+        commands
     }
-}
+    
 
-const BYTES8: u64 = 0xFFFFFFFFFFFFFFFF;
-const BYTES4: u32 = 0xFFFFFFFF;
-pub fn instructions_handler(body: &Vec<Instruction>, context: &mut Context) -> Vec<AbstractOp> {
-    let mut commands: Vec<AbstractOp> = Vec::new();
+    fn if_fn() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    for instr in body {
-        match &instr.kind {
-            InsnKind::Block { ty, body } => {
-                let mut rng = rand::thread_rng();
-                let id: u32 = rng.gen();
-                context.labels.push(id.to_string());
-                commands.append(instructions_handler(body, context).as_mut());
-                commands.push(AbstractOp::Label(id.to_string()));
-                commands.push(AbstractOp::Op(Op::JumpDest));
-                context.labels.pop();
-            }
-            InsnKind::Loop { ty, body } => {
-                let mut rng = rand::thread_rng();
-                let id: u32 = rng.gen();
-                context.labels.push(id.to_string());
-                commands.push(AbstractOp::Label(id.to_string()));
-                commands.push(AbstractOp::Op(Op::JumpDest));
-                commands.append(instructions_handler(body, context).as_mut());
-                context.labels.pop();
-            }
-            InsnKind::I32Add => {
-                commands.append(i32Add().as_mut());
-            }
-            InsnKind::I64Add => {
-                commands.append(i64Add().as_mut());
-            }
-            InsnKind::I32Sub => {
-                commands.append(i32Sub().as_mut());
-            }
-            InsnKind::I64Sub => {
-                commands.append(i64Sub().as_mut());
-            }
-            InsnKind::I32Mul => {
-                commands.append(i32Mul().as_mut());
-            }
-            InsnKind::I64Mul => {
-                commands.append(i64Mul().as_mut());
-            }
-            InsnKind::I32And => {
-                commands.append(i32And().as_mut());
-            }
-            InsnKind::I64And => {
-                commands.append(i64And().as_mut());
-            }
-            InsnKind::I32Or => {
-                commands.append(i32Or().as_mut());
-            }
-            InsnKind::I64Or => {
-                commands.append(i64Or().as_mut());
-            }
-            InsnKind::I32Xor => {
-                commands.append(i32Xor().as_mut());
-            }
-            InsnKind::I64Xor => {
-                commands.append(i64Xor().as_mut());
-            }
-            InsnKind::I32Eq => {
-                commands.append(eq().as_mut());
-            }
-            InsnKind::I32Eqz => {
-                commands.append(eqz().as_mut());
-            }
-            InsnKind::I32Ne => {
-                commands.append(ne().as_mut());
-            }
-            InsnKind::I64Eq => {
-                commands.append(eq().as_mut());
-            }
-            InsnKind::I64Eqz => {
-                commands.append(eqz().as_mut());
-            }
-            InsnKind::I64Ne => {
-                commands.append(ne().as_mut());
-            }
-            InsnKind::I32LtS => {
-                commands.append(i32Lts().as_mut());
-            }
-            InsnKind::I64LtS => {
-                commands.append(i64Lts().as_mut());
-            }
-            InsnKind::I32GtS => {
-                commands.append(i32Gts().as_mut());
-            }
-            InsnKind::I64GtS => {
-                commands.append(i64Gts().as_mut());
-            }
-            InsnKind::I32LeU => {
-                commands.append(Leu().as_mut());
-            }
-            InsnKind::I64LeU => {
-                commands.append(Leu().as_mut());
-            }
-            InsnKind::I32GeU => {
-                commands.append(Geu().as_mut());
-            }
-            InsnKind::I64GeU => {
-                commands.append(Geu().as_mut());
-            }
-            InsnKind::I32LeS => {
-                commands.append(i32Les().as_mut());
-            }
-            InsnKind::I64LeS => {
-                commands.append(i64Les().as_mut());
-            }
-            InsnKind::I32GeS => {
-                commands.append(i32Ges().as_mut());
-            }
-            InsnKind::I64GeS => {
-                commands.append(i64Ges().as_mut());
-            }
-            InsnKind::I32DivU => {
-                commands.append(i32Divu().as_mut());
-            }
-            InsnKind::I64DivU => {
-                commands.append(i64Divu().as_mut());
-            }
-            InsnKind::I32DivS => {
-                commands.append(i32Divs().as_mut());
-            }
-            InsnKind::I64DivS => {
-                commands.append(i64Divs().as_mut());
-            }
-            InsnKind::I32RemU => {
-                commands.append(i32Remu().as_mut());
-            }
-            InsnKind::I64RemU => {
-                commands.append(i64Remu().as_mut());
-            }
-            InsnKind::I32RemS => {
-                commands.append(i32Rems().as_mut());
-            }
-            InsnKind::I64RemS => {
-                commands.append(i64Rems().as_mut());
-            }
-            InsnKind::I32GtU => {
-                commands.append(i32Gtu().as_mut());
-            }
-            InsnKind::I64GtU => {
-                commands.append(i64Gtu().as_mut());
-            }
-            InsnKind::I32LtU => {
-                commands.append(i32Ltu().as_mut());
-            }
-            InsnKind::I64LtU => {
-                commands.append(i64Ltu().as_mut());
-            }
-            InsnKind::I32ShrS => {
-                commands.append(i32Shrs().as_mut());
-            }
-            InsnKind::I64ShrS => {
-                commands.append(i64Shrs().as_mut());
-            }
-            InsnKind::I32Rotl => {
-                commands.append(i32Rotl().as_mut());
-            }
-            InsnKind::I64Rotl => {
-                commands.append(i64Rotl().as_mut());
-            }
-            InsnKind::I32Rotr => {
-                commands.append(i32Rotr().as_mut());
-            }
-            InsnKind::I64Rotr => {
-                commands.append(i64Rotr().as_mut());
-            }
-            InsnKind::I32Popcnt => {
-                commands.append(i32Popcnt().as_mut());
-            }
-            InsnKind::I64Popcnt => {
-                commands.append(i64Popcnt().as_mut());
-            }
-            InsnKind::I32Ctz => {
-                commands.append(i32Ctz().as_mut());
-            }
-            InsnKind::I64Ctz => {
-                commands.append(i64Ctz().as_mut());
-            }
-            InsnKind::I32Clz => {
-                commands.append(i32Clz().as_mut());
-            }
-            InsnKind::I64Clz => {
-                commands.append(i64Clz().as_mut());
-            }
-            InsnKind::I32ShrU => {
-                commands.append(i32Shru().as_mut());
-            }
-            InsnKind::I64ShrU => {
-                commands.append(i64Shru().as_mut());
-            }
-            InsnKind::I32Shl => {
-                commands.append(i32Shl().as_mut());
-            }
-            InsnKind::I64Shl => {
-                commands.append(i64Shl().as_mut());
-            }
-            InsnKind::Nop => {
-                commands.append(Nop().as_mut());
-            }
-            InsnKind::Unreachable => {
-                commands.append(unreachable().as_mut());
-            }
-            InsnKind::LocalGet(idx) => {
-                commands.append(Local_get(idx).as_mut());
-            }
-            InsnKind::LocalSet(idx) => {
-                commands.append(Local_set(idx).as_mut());
-            }
-            InsnKind::LocalTee(idx) => {
-                commands.append(Local_tee(idx).as_mut());
-            }
-            InsnKind::BrIf(idx) => {
-                commands.append(br_if(context, idx).as_mut());
-            }
-            InsnKind::Br(idx) => {
-                commands.append(br(context, idx).as_mut());
-            }
-            InsnKind::Drop => {
-                commands.append(drop().as_mut());
-            }
-            InsnKind::Select => {
-                commands.append(select().as_mut());
-            }
-            InsnKind::If {
-                ty,
-                then_body,
-                else_body,
-            } => {
-                commands.append(if_fn().as_mut());
-            }
-            InsnKind::Call(fnidx) => {
-                commands.append(call(fnidx).as_mut());
-            }
-            InsnKind::BrTable {
-                labels,
-                default_label,
-            } => {
-                commands.append(br_table().as_mut());
-            }
-            InsnKind::Return => {
-                commands.append(return_fn().as_mut());
-            }
-            InsnKind::CallIndirect(typidx) => {
-                commands.append(call_indirect(typidx).as_mut());
-            }
-            InsnKind::GlobalGet(globalidx) => {
-                commands.append(global_get(globalidx).as_mut());
-            }
-            InsnKind::GlobalSet(globalidx) => {
-                commands.append(global_set(globalidx).as_mut());
-            }
-            InsnKind::I32Load8S(mem) => {
-                commands.append(i32_load_8s(mem).as_mut());
-            }
-            InsnKind::I32Load8U(mem) => {
-                commands.append(i32_load_8u(mem).as_mut());
-            }
-            InsnKind::I64Load8S(mem) => {
-                commands.append(i64_load_8s(mem).as_mut());
-            }
-            InsnKind::I64Load8U(mem) => {
-                commands.append(i64_load_8u(mem).as_mut());
-            }
-            InsnKind::I32Load16S(mem) => {
-                commands.append(i32_load_16s(mem).as_mut());
-            }
-            InsnKind::I32Load16U(mem) => {
-                commands.append(i32_load_16u(mem).as_mut());
-            }
-            InsnKind::I64Load16S(mem) => {
-                commands.append(i64_load_16s(mem).as_mut());
-            }
-            InsnKind::I64Load16U(mem) => {
-                commands.append(i64_load_16u(mem).as_mut());
-            }
-            InsnKind::I64Load32S(mem) => {
-                commands.append(i64_load_32s(mem).as_mut());
-            }
-            InsnKind::I64Load32U(mem) => {
-                commands.append(i64_load_32u(mem).as_mut());
-            }
-            InsnKind::I32Load(mem) => {
-                commands.append(i32_load(mem).as_mut());
-            }
-            InsnKind::I64Load(mem) => {
-                commands.append(i64_load(mem).as_mut());
-            }
-            InsnKind::I32Store(mem) => {
-                commands.append(i32_store(mem).as_mut());
-            }
-            InsnKind::I64Store(mem) => {
-                commands.append(i64_store(mem).as_mut());
-            }
-            InsnKind::I32Store8(mem) => {
-                commands.append(i32_store8(mem).as_mut());
-            }
-            InsnKind::I32Store16(mem) => {
-                commands.append(i32_store16(mem).as_mut());
-            }
-            InsnKind::I64Store8(mem) => {
-                commands.append(i64_store8(mem).as_mut());
-            }
-            InsnKind::I64Store16(mem) => {
-                commands.append(i64_store16(mem).as_mut());
-            }
-            InsnKind::I64Store32(mem) => {
-                commands.append(i64_store32(mem).as_mut());
-            }
-            InsnKind::MemorySize => {
-                commands.append(memory_size().as_mut());
-            }
-            InsnKind::MemoryGrow => {
-                commands.append(memory_grow().as_mut());
-            }
-            InsnKind::I32Const(c) => {
-                commands.append(i32_const_fn(c).as_mut());
-            }
-            InsnKind::I64Const(c) => {
-                commands.append(i64_const_fn(c).as_mut());
-            }
-            InsnKind::I32WrapI64 => {
-                commands.append(i32_wrap_i64().as_mut());
-            }
-            InsnKind::I64ExtendI32S => {
-                commands.append(i64_extend_i32s().as_mut());
-            }
-            InsnKind::I64ExtendI32U => {
-                commands.append(i64_extend_i32u().as_mut());
-            }
-            _ => {
-                commands.push(AbstractOp::Op(Op::Invalid));
-            }
-        };
+        result.push(AbstractOp::Op(Op::Invalid));
+
+        result
     }
 
-    commands
-}
+    fn i64_wrap_i32u() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn if_fn() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32_wrap_i64() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_wrap_i32u() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_extend_i32s() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_wrap_i64() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_extend_i32u() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_extend_i32s() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64_wrap_i32s() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_extend_i32u() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i32_const_fn(c: &i32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_wrap_i32s() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_const_fn(c: &i64) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_const_fn(c: &i32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn call(fnidx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_const_fn(c: &i64) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(*fnidx as u32))));
+        result.push(AbstractOp::Op(Op::Call));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn memory_size() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn call(fnidx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(*fnidx as u32))));
-    result.push(AbstractOp::Op(Op::Call));
+        result
+    }
 
-    result
-}
+    fn memory_grow() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn memory_size() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn br_table() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn memory_grow() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn return_fn() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+        result.push(AbstractOp::Op(Op::MStore));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+        result.push(AbstractOp::Op(Op::Return));
+        result
+    }
 
-fn br_table() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn call_indirect(typidx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result
-}
+        result
+    }
 
-fn return_fn() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-    result.push(AbstractOp::Op(Op::MStore));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-    result.push(AbstractOp::Op(Op::Return));
-    result
-}
+    fn global_get(globalIdx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn call_indirect(typidx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn global_set(globalIdx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn global_get(globalIdx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32_load_8s(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn global_set(globalIdx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32_load_8u(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_load_8s(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32_load_16s(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_load_8u(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32_load_16u(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_load_16s(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_load_8s(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_load_16u(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_load_8u(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_load_8s(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
+    fn i32_load(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result
-}
+        result
+    }
 
-fn i64_load_8u(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn i64_load(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
-fn i32_load(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Invalid));
+    fn i32_store(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Invalid));
 
-fn i64_load(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32_store8(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_store(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32_store16(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_store8(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_store(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32_store16(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_store8(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_store(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_store16(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_store8(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_store32(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_store16(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32Add() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Add));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-fn i64_store32(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Invalid));
+    fn i64Add() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Add));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-fn i32Add() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Add));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64_load_16s(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Add() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Add));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64_load_16u(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_load_16s(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_load_32s(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_load_16u(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64_load_32u(mem: &Mem) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64_load_32s(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
+    fn i32Sub() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Sub));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::And));
 
-fn i64_load_32u(mem: &Mem) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Invalid));
+    fn i64Sub() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
-fn i32Sub() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Sub));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Sub));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i32Mul() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Sub() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Mul));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Sub));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64Mul() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Mul() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Mul));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Mul));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i32And() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Mul() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Mul));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64And() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32And() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i32Or() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64And() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Or));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64Or() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Or() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Or));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Or));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i32Xor() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Or() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Xor));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Or));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64Xor() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Xor() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Xor));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Xor));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn eq() -> Vec<AbstractOp> {
+        //TODO might be wrong
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Xor() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Eq));
 
-    result.push(AbstractOp::Op(Op::Xor));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn eqz() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn eq() -> Vec<AbstractOp> {
-    //TODO might be wrong
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::IsZero));
 
-    result.push(AbstractOp::Op(Op::Eq));
+        result
+    }
 
-    result
-}
+    fn ne() -> Vec<AbstractOp> {
+        //TODO might be wrong
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn eqz() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(0x1 as u8))));
+        result.push(AbstractOp::Op(Op::Xor));
 
-    result.push(AbstractOp::Op(Op::IsZero));
+        result
+    }
 
-    result
-}
+    fn extend8s() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn ne() -> Vec<AbstractOp> {
-    //TODO might be wrong
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(0xff as u8))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(0x1 as u8))));
-    result.push(AbstractOp::Op(Op::Xor));
+        result
+    }
 
-    result
-}
+    fn extend16s() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn extend8s() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push2(Imm::from(0xffff as u16))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(1 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(0xff as u8))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(0 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i32Lts() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn extend16s() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::SLt));
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::from(0xffff as u16))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(1 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64Lts() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Lts() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::SLt));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::SLt));
+        result
+    }
 
-    result
-}
+    fn i32Gts() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Lts() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SLt));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::SLt));
+        result
+    }
 
-    result
-}
+    fn i64Gts() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Gts() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SLt));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SLt));
+        result
+    }
 
-    result
-}
+    fn Leu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Gts() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Swap2));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Lt));
+        result.push(AbstractOp::Op(Op::Or));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SLt));
+        result
+    }
+    fn Geu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Swap2));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Gt));
+        result.push(AbstractOp::Op(Op::Or));
 
-fn Leu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Swap2));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Lt));
-    result.push(AbstractOp::Op(Op::Or));
+    fn i32Ges() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
-fn Geu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Swap2));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SGt));
+        result.push(AbstractOp::Op(Op::Or));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Swap2));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Gt));
-    result.push(AbstractOp::Op(Op::Or));
+        result
+    }
 
-    result
-}
+    fn i64Ges() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Ges() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Swap2));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SGt));
+        result.push(AbstractOp::Op(Op::Or));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Swap2));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SGt));
-    result.push(AbstractOp::Op(Op::Or));
+        result
+    }
 
-    result
-}
+    fn i32Les() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Ges() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Swap2));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SLt));
+        result.push(AbstractOp::Op(Op::Or));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Swap2));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SGt));
-    result.push(AbstractOp::Op(Op::Or));
+        result
+    }
 
-    result
-}
+    fn i64Les() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Les() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Swap2));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SLt));
+        result.push(AbstractOp::Op(Op::Or));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Swap2));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SLt));
-    result.push(AbstractOp::Op(Op::Or));
+        result
+    }
 
-    result
-}
+    fn i32Divu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-fn i64Les() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Swap2));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SLt));
-    result.push(AbstractOp::Op(Op::Or));
+        result.push(AbstractOp::Op(Op::Div));
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-fn i32Divu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::Div));
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+    fn i64Divu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Div));
 
-fn i64Divu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Div));
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+    fn i32Divs() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Push32(Imm::from(
+            b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\x80\0\0\0".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Dup2));
 
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result.push(AbstractOp::Op(Op::Push32(Imm::from(
+            b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff"
+                .clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+            "integer_overflow",
+        ))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
 
-fn i32Divs() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(
-        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\x80\0\0\0".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(
-        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
-        "integer_overflow",
-    ))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Op(Op::SDiv));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-    result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Label("integer_overflow".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::SDiv));
+        result.push(AbstractOp::Op(Op::Push16(Imm::from(
+            b"integer overflow".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result
+    }
 
-    result.push(AbstractOp::Label("integer_overflow".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+    fn i64Divs() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push16(Imm::from(
-        b"integer overflow".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Op(Op::Push32(Imm::from(
+            b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\0\0\0\0\0\0\0".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::Dup2));
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push32(Imm::from(
+            b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff"
+                .clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Eq));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+            "integer_overflow",
+        ))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-fn i64Divs() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SDiv));
+
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-    result.push(AbstractOp::Op(Op::Dup2));
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(
-        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\0\0\0\0\0\0\0".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::Dup2));
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
+
+        result.push(AbstractOp::Label("integer_overflow".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+
+        result.push(AbstractOp::Op(Op::Push16(Imm::from(
+            b"integer overflow".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-    result.push(AbstractOp::Op(Op::Push32(Imm::from(
-        b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\xff\xff\xff\xff\xff\xff\xff\xff".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Eq));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
-        "integer_overflow",
-    ))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
+    fn i32Remu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
+
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
+
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Mod));
+
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
+
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
+
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+
+        result
+    }
+
+    fn i64Remu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SDiv));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Mod));
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-    result.push(AbstractOp::Label("integer_overflow".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::Push16(Imm::from(
-        b"integer overflow".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result
+    }
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result
-}
+    fn i32Rems() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-fn i32Remu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
-
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
-
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
-
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
-
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SMod));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-    result
-}
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-fn i64Remu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
+    fn i64Rems() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::IsZero));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
+        result.push(AbstractOp::Op(Op::JumpI));
 
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::SMod));
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-    result
-}
+        result.push(AbstractOp::Label("div_by_zero".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Push22(Imm::from(
+            b"integer divide by zero".clone(),
+        ))));
+        result.push(AbstractOp::Op(Op::Revert));
 
-fn i32Rems() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Label("end".to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SMod));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+        result
+    }
 
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+    fn i32Gtu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Gt));
 
-    result
-}
+        result
+    }
 
-fn i64Rems() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn i64Gtu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::IsZero));
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("div_by_zero"))));
-    result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Gt));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::SMod));
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label("end"))));
-    result.push(AbstractOp::Op(Op::Jump));
+    fn i32Ltu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Label("div_by_zero".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Push22(Imm::from(
-        b"integer divide by zero".clone(),
-    ))));
-    result.push(AbstractOp::Op(Op::Revert));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Lt));
 
-    result.push(AbstractOp::Label("end".to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result
+    }
 
-    result
-}
+    fn i64Ltu() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Gtu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Lt));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Gt));
+        result
+    }
 
-    result
-}
+    fn i32Shrs() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Gtu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Mod));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Gt));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Sar));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result
-}
+        result
+    }
 
-fn i32Ltu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn i64Shrs() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Lt));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(64 as u8))));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Mod));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
+        result.push(AbstractOp::Op(Op::SignExtend));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Sar));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-fn i64Ltu() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Lt));
+    fn i32Rotl() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result
-}
+        result
+    }
 
-fn i32Shrs() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn i64Rotl() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
-    result.push(AbstractOp::Op(Op::Swap1));
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(3 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Sar));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+    fn i32Rotr() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result
-}
+        result
+    }
 
-fn i64Shrs() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn i64Rotr() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(64 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
-    result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(7 as u8))));
-    result.push(AbstractOp::Op(Op::SignExtend));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Sar));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i32Popcnt() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Rotl() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Invalid));
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result
-}
+        result
+    }
 
-fn i64Rotl() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Invalid));
+    fn i64Popcnt() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Invalid));
 
-fn i32Rotr() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32Ctz() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Rotr() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64Ctz() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Popcnt() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32Clz() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Popcnt() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i64Clz() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i32Ctz() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn i32Shru() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Ctz() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Mod));
+        result.push(AbstractOp::Op(Op::Shr));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result
-}
+        result
+    }
 
-fn i32Clz() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn i64Shru() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Swap1));
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(64 as u8))));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Mod));
+        result.push(AbstractOp::Op(Op::Shr));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
 
-fn i64Clz() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Invalid));
+    fn Shr() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Shr));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-fn i32Shru() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
+    fn i32Shl() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(31 as u8))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Shl));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
+        result.push(AbstractOp::Op(Op::And));
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(32 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
-    result.push(AbstractOp::Op(Op::Shr));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result
-}
+    fn i64Shl() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn i64Shru() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push1(Imm::from(63 as u8))));
+        result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Shl));
+        result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
+        result.push(AbstractOp::Op(Op::And));
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Swap1));
+    fn Nop() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(64 as u8))));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Mod));
-    result.push(AbstractOp::Op(Op::Shr));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result
-}
+        result
+    }
 
-fn Shr() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn unreachable() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Shr));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+        result.push(AbstractOp::Op(Op::Invalid));
 
-    result
-}
+        result
+    }
 
-fn i32Shl() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(31 as u8))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Shl));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-    result.push(AbstractOp::Op(Op::And));
+    fn Local_get(idx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result
-}
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
+        result.push(AbstractOp::Op(Op::MLoad));
 
-fn i64Shl() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push1(Imm::from(63 as u8))));
-    result.push(AbstractOp::Op(Op::And));
-    result.push(AbstractOp::Op(Op::Shl));
-    result.push(AbstractOp::Op(Op::Push8(Imm::from(BYTES8))));
-    result.push(AbstractOp::Op(Op::And));
-    result
-}
+    fn Local_set(idx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn Nop() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
+        result.push(AbstractOp::Op(Op::MStore));
 
-    result.push(AbstractOp::Op(Op::JumpDest));
+        result
+    }
 
-    result
-}
+    fn Local_tee(idx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-fn unreachable() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Op(Op::Dup1));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
+        result.push(AbstractOp::Op(Op::MStore));
 
-    result.push(AbstractOp::Op(Op::Invalid));
+        result
+    }
 
-    result
-}
+    fn br_if(context: &Context, idx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        //TODO
+        /*result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+            context.labels.get(*idx as usize).unwrap(),
+        ))));*/
+        result.push(AbstractOp::Op(Op::JumpI));
 
-fn Local_get(idx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result
+    }
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
-    result.push(AbstractOp::Op(Op::MLoad));
+    fn br(context: &Context, idx: &u32) -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        //TODO
+        /*result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+            context.labels.get(*idx as usize).unwrap(),
+        ))));
+        result.push(AbstractOp::Op(Op::Jump));*/
 
-    result
-}
+        result
+    }
 
-fn Local_set(idx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn drop_inst() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
 
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
-    result.push(AbstractOp::Op(Op::MStore));
+        result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
 
-    result
-}
+        result
+    }
 
-fn Local_tee(idx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+    fn select() -> Vec<AbstractOp> {
+        let mut result: Vec<AbstractOp> = Vec::new();
+        let mut rng = rand::thread_rng();
+        let random_nonzero: u32 = rng.gen();
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+            random_nonzero.to_string(),
+        ))));
+        result.push(AbstractOp::Op(Op::JumpI));
+        result.push(AbstractOp::Op(Op::Pop));
 
-    result.push(AbstractOp::Op(Op::Dup1));
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(idx * 0x20 as u32))));
-    result.push(AbstractOp::Op(Op::MStore));
+        let random_exit: u32 = rng.gen();
+        result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
+            random_exit.to_string(),
+        ))));
+        result.push(AbstractOp::Op(Op::Jump));
 
-    result
-}
+        result.push(AbstractOp::Label(random_nonzero.to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
+        result.push(AbstractOp::Op(Op::Swap1));
+        result.push(AbstractOp::Op(Op::Pop));
 
-fn br_if(context: &Context, idx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
+        result.push(AbstractOp::Label(random_exit.to_string()));
+        result.push(AbstractOp::Op(Op::JumpDest));
 
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
-        context.labels.get(*idx as usize).unwrap(),
-    ))));
-    result.push(AbstractOp::Op(Op::JumpI));
-
-    result
-}
-
-fn br(context: &Context, idx: &u32) -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
-        context.labels.get(*idx as usize).unwrap(),
-    ))));
-    result.push(AbstractOp::Op(Op::Jump));
-
-    result
-}
-
-fn drop() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-
-    result.push(AbstractOp::Op(Op::Push4(Imm::from(BYTES4))));
-
-    result
-}
-
-fn select() -> Vec<AbstractOp> {
-    let mut result: Vec<AbstractOp> = Vec::new();
-    let mut rng = rand::thread_rng();
-    let random_nonzero: u32 = rng.gen();
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
-        random_nonzero.to_string(),
-    ))));
-    result.push(AbstractOp::Op(Op::JumpI));
-    result.push(AbstractOp::Op(Op::Pop));
-
-    let random_exit: u32 = rng.gen();
-    result.push(AbstractOp::Op(Op::Push2(Imm::with_label(
-        random_exit.to_string(),
-    ))));
-    result.push(AbstractOp::Op(Op::Jump));
-
-    result.push(AbstractOp::Label(random_nonzero.to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-    result.push(AbstractOp::Op(Op::Swap1));
-    result.push(AbstractOp::Op(Op::Pop));
-
-    result.push(AbstractOp::Label(random_exit.to_string()));
-    result.push(AbstractOp::Op(Op::JumpDest));
-
-    result
-}
+        result
+    }

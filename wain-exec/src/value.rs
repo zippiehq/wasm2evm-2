@@ -5,7 +5,7 @@ use std::ops;
 use wain_ast::ValType;
 
 #[cfg_attr(test, derive(Debug))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Value {
     I32(i32),
     I64(i64),

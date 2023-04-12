@@ -456,6 +456,8 @@ impl<'a> Tester<'a> {
                 expected,
             }) => {
                 let ret = instances.invoke(invoke)?;
+                println!("expected{:?}, got{:?}, ivvoke{:#?}", expected, ret, invoke.name);
+
                 if let (Some(expected), Some(actual)) = (*expected, ret) {
                     if !expected.matches(&actual) {
                         return Err(Error::run_error(

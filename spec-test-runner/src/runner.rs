@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time;
 use wain_ast as ast;
 //use wain_exec::{Runtime, Value};
+use crate::runner::wat::parse;
 use revm_primitives::result::*;
 use revm_primitives::Bytes;
 use std::convert::TryInto;
@@ -19,7 +20,6 @@ use wain_syntax_binary as binary;
 use wain_syntax_text as wat;
 use wain_validate::validate;
 use wasm_reader::*;
-use crate::runner::wat::parse;
 
 #[cfg(not(target_os = "linux"))]
 const SKIPPED: &[&str] = &["linking.wast"];
@@ -268,7 +268,6 @@ impl<W: Write> Runner<W> {
                         self.report(nth, num_errs, err);
                     }
                     tester.sum
-
                 }
             }
         };
@@ -479,7 +478,11 @@ impl<'a> Tester<'a> {
                 expected,
             }) => {
                 let ret = instances.invoke(invoke);
-                if let (Some(expected), Some(actual)) = (*expected, ret) {
+                println!(
+                    "expected{:?}, got{:?}, ivvoke{:#?}",
+                    expected, ret, invoke.name
+                );
+                if let (Some(expected), Some(actual)) = (*expected, ret.clone()) {
                     let mut is_matches = false;
                     match expected {
                         Const::I32(i) => {
@@ -487,28 +490,25 @@ impl<'a> Tester<'a> {
                             let result = i32::from_be_bytes([
                                 actual[28], actual[29], actual[30], actual[31],
                             ]);
-                            println!("expected{:?}, got{:?}, ivvoke{:#?}", i, result, invoke.name);
+                            //println!("expected{:?}, got{:?}, ivvoke{:#?}", i, result, invoke.name);
 
                             is_matches = i == result;
                         }
                         Const::I64(i) => {
                             let actual = actual.as_ref();
                             let result = i64::from_be_bytes([
-                                actual[24], actual[25], actual[26], actual[27], actual[28], actual[29],
-                                actual[30], actual[31]
+                                actual[24], actual[25], actual[26], actual[27], actual[28],
+                                actual[29], actual[30], actual[31],
                             ]);
-                            println!("expected{:?}, got{:?}, ivvoke{:#?}", i, result, invoke.name);
+                            //println!("expected{:?}, got{:?}, ivvoke{:#?}", i, result, invoke.name);
                             is_matches = i == result;
-
                         }
                         _ => {}
                     }
                     if !is_matches {
                         let actual = actual.as_ref();
-                            let result = i32::from_be_bytes([
-                                actual[28], actual[29],
-                                actual[30], actual[31]
-                            ]);
+                        let result =
+                            i32::from_be_bytes([actual[28], actual[29], actual[30], actual[31]]);
                         return Err(Error::run_error(
                             RunKind::InvokeUnexpectedReturn {
                                 actual: Value::I32(result),
@@ -518,8 +518,18 @@ impl<'a> Tester<'a> {
                             *start,
                         ));
                     }
-                }
-                Ok(())
+                    return Ok(())
+                } 
+                if  (None, None) == (*expected, ret.clone()){
+                    return Ok(())
+
+                } 
+                
+                Err(Error::run_error(
+                    RunKind::UnexpectedValid { expected: format!("returned value {:?}", ret) },
+                    &self.source,
+                    *start,
+                ))
             }
             /*AssertReturn(wast::AssertReturn::Global {
                 start,
@@ -528,13 +538,36 @@ impl<'a> Tester<'a> {
             }) => {
                 let (runtime, _) = instances.find(get.id, *start)?;
                 if let Some(actual) = runtime.get_global(&get.name) {
-                    if expected.matches(&actual) {
+                    let mut is_matches = false;
+                    match expected {
+                        Const::I32(i) => {
+                            let actual = actual.as_ref();
+                            let result = i32::from_be_bytes([
+                                actual[28], actual[29], actual[30], actual[31],
+                            ]);
+                            //println!("expected{:?}, got{:?}, ivvoke{:#?}", i, result, invoke.name);
+
+                            is_matches = *i == result;
+                        }
+                        Const::I64(i) => {
+                            let actual = actual.as_ref();
+                            let result = i64::from_be_bytes([
+                                actual[24], actual[25], actual[26], actual[27], actual[28], actual[29],
+                                actual[30], actual[31]
+                            ]);
+                            //println!("expected{:?}, got{:?}, ivvoke{:#?}", i, result, invoke.name);
+                            is_matches = *i == result;
+
+                        }
+                        _ => {}
+                    }
+                    if is_matches {
                         Ok(())
                     } else {
                         Err(Error::run_error(
                             RunKind::InvokeUnexpectedReturn {
                                 actual,
-                                expected: *expected,
+                                expected: expected.to_value().unwrap(),
                             },
                             self.source,
                             *start,
@@ -622,7 +655,6 @@ impl<'a> Tester<'a> {
                 expected,
             }) => {
                 let success = match &module.src {
-
                     wast::EmbeddedSrc::Quote(text) => match wat::parse(text) {
                         Ok(_) => true,
                         Err(_err) => {
@@ -688,7 +720,13 @@ impl<'a> Tester<'a> {
                 self.source,
                 *start,
             )),
-            Invoke(invoke) => Ok(instances.invoke(invoke).map(|_| ()).unwrap()),
+            Invoke(invoke) => {
+                match instances.invoke(invoke).map(|_| ()) {
+                    Some(inv) => return Ok(inv),
+                    _ => return Err(Error::run_error(RunKind::NotImplementedYet, self.source, 0)),
+                };
+                //Ok(instances.invoke(invoke).map(|_| ()).unwrap())
+            }
             _ => {
                 println!("got there");
                 Err(Error::run_error(RunKind::NotImplementedYet, self.source, 0))
